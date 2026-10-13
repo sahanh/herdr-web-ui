@@ -78,6 +78,8 @@ export interface Settings {
   palette: Palette;
   /** xterm font size in px */
   terminalFontSize: number;
+  /** xterm lineHeight: each row's height as a multiple of the font's; 1 is xterm's own */
+  terminalLineHeight: number;
   /** xterm cursorStyle; a program's own DECSCUSR still changes it, as before this setting existed */
   terminalCursorStyle: TerminalCursorStyle;
   /** xterm cursorBlink */
@@ -171,6 +173,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quietOpenedDone: false,
   palette: "amber",
   terminalFontSize: 13,
+  terminalLineHeight: 1,
   terminalCursorStyle: "block",
   terminalCursorBlink: true,
   terminalWheelSpeed: 1,
@@ -246,6 +249,9 @@ export function alertPrefs(settings: Settings): AlertPrefs {
 const STORAGE_KEY = "herdr-web-ui:settings";
 export const TERMINAL_FONT_MIN = 10;
 export const TERMINAL_FONT_MAX = 22;
+/** terminal line height bounds, in steps of 0.1 */
+export const TERMINAL_LINE_HEIGHT_MIN = 1;
+export const TERMINAL_LINE_HEIGHT_MAX = 2;
 export const TERMINAL_WHEEL_SPEED_MIN = 1;
 export const TERMINAL_WHEEL_SPEED_MAX = 10;
 
@@ -329,6 +335,9 @@ export function sanitizeSettings(raw: unknown): Settings {
     quietOpenedDone: record["quietOpenedDone"] === true,
     palette: record["palette"] === "amber" || record["palette"] === "report" || record["palette"] === "charcoal" || record["palette"] === "catppuccin" || record["palette"] === "lilac" || record["palette"] === "forest" ? record["palette"] : DEFAULT_SETTINGS.palette,
     terminalFontSize: typeof font === "number" && Number.isFinite(font) ? clampFont(font) : DEFAULT_SETTINGS.terminalFontSize,
+    terminalLineHeight: typeof record["terminalLineHeight"] === "number" && Number.isFinite(record["terminalLineHeight"])
+      ? Math.min(TERMINAL_LINE_HEIGHT_MAX, Math.max(TERMINAL_LINE_HEIGHT_MIN, Math.round(record["terminalLineHeight"] * 10) / 10))
+      : DEFAULT_SETTINGS.terminalLineHeight,
     terminalCursorStyle: TERMINAL_CURSOR_STYLES.includes(record["terminalCursorStyle"] as TerminalCursorStyle)
       ? record["terminalCursorStyle"] as TerminalCursorStyle
       : DEFAULT_SETTINGS.terminalCursorStyle,

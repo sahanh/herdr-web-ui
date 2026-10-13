@@ -7,7 +7,7 @@ import type { AppActions } from "../lib/actions.ts";
 import { useInstallPrompt } from "../lib/install.ts";
 import { SHORTCUTS, formatKeys, isMacPlatform, shortcutDisplayKeys, shortcutKeys, shortcutConflict } from "../lib/shortcuts.ts";
 import { isReservedShortcutKey } from "../lib/shortcutBindings.ts";
-import { CHAT_FONT_MAX, CHAT_FONT_MIN, CHAT_WIDTHS, chatFontSize, DEFAULT_SETTINGS, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, TERMINAL_FONT_MAX, TERMINAL_FONT_MIN, TERMINAL_WHEEL_SPEED_MAX, TERMINAL_WHEEL_SPEED_MIN, TERMINAL_CURSOR_STYLES, DICTATION_LANGUAGES, VOICE_BUTTONS, useSettings, forgetPaneViews, type DictationLanguage, type TerminalCursorStyle, type VoiceButton } from "../lib/settings.ts";
+import { CHAT_FONT_MAX, CHAT_FONT_MIN, CHAT_WIDTHS, chatFontSize, DEFAULT_SETTINGS, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, TERMINAL_FONT_MAX, TERMINAL_FONT_MIN, TERMINAL_LINE_HEIGHT_MAX, TERMINAL_LINE_HEIGHT_MIN, TERMINAL_WHEEL_SPEED_MAX, TERMINAL_WHEEL_SPEED_MIN, TERMINAL_CURSOR_STYLES, DICTATION_LANGUAGES, VOICE_BUTTONS, useSettings, forgetPaneViews, type DictationLanguage, type TerminalCursorStyle, type VoiceButton } from "../lib/settings.ts";
 import { LANGUAGE_NAMES, LANGUAGE_SETTINGS, useLocale, useT } from "../lib/i18n.ts";
 import { useFocusTrap } from "../lib/useFocusTrap.ts";
 import { KeyBarSettings } from "./KeyBarSettings.tsx";
@@ -271,6 +271,9 @@ function TerminalPage({ keyBarButtonRef, onEditKeyBar }: { keyBarButtonRef: RefO
     <SettingsGroup>
       <SettingsRow label={t("Terminal font size")} description={t("Applied to every terminal pane")}>
         <Stepper label={t("Terminal font size")} value={settings.terminalFontSize} text={`${settings.terminalFontSize}px`} min={TERMINAL_FONT_MIN} max={TERMINAL_FONT_MAX} decreaseLabel={t("Decrease terminal font size")} increaseLabel={t("Increase terminal font size")} onChange={(terminalFontSize) => update({ terminalFontSize })} />
+      </SettingsRow>
+      <SettingsRow label={t("Terminal line height")} description={t("Space between terminal rows, as a multiple of the font size")}>
+        <Stepper label={t("Terminal line height")} value={Math.round(settings.terminalLineHeight * 10)} text={`${settings.terminalLineHeight.toFixed(1)}×`} min={TERMINAL_LINE_HEIGHT_MIN * 10} max={TERMINAL_LINE_HEIGHT_MAX * 10} decreaseLabel={t("Decrease terminal line height")} increaseLabel={t("Increase terminal line height")} onChange={(tenths) => update({ terminalLineHeight: tenths / 10 })} />
       </SettingsRow>
       <SettingsRow label={t("Fit 80 columns in a split pane")} description={t("A split pane narrower than 80 columns draws in a smaller font, down to 10px, so a program that needs 80 columns still fits. Turn it off to keep your font size in every pane.")}>
         <Toggle label={t("Fit 80 columns in a split pane")} checked={settings.narrowPaneFont} onChange={(narrowPaneFont) => update({ narrowPaneFont })} />

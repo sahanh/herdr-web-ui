@@ -32,6 +32,13 @@ it("keeps the screen wake lock off until this device explicitly enables it", () 
   expect(sanitizeSettings({ terminalWheelSpeed: 99 }).terminalWheelSpeed).toBe(10);
   expect(sanitizeSettings({ terminalWheelSpeed: 0 }).terminalWheelSpeed).toBe(1);
   expect(sanitizeSettings({ terminalWheelSpeed: "3" }).terminalWheelSpeed).toBe(1);
+  // the terminal's line height: xterm's own 1 unless chosen, in tenths and bounded
+  expect(sanitizeSettings({}).terminalLineHeight).toBe(1);
+  expect(sanitizeSettings({ terminalLineHeight: 1.3 }).terminalLineHeight).toBe(1.3);
+  expect(sanitizeSettings({ terminalLineHeight: 1.26 }).terminalLineHeight).toBe(1.3);
+  expect(sanitizeSettings({ terminalLineHeight: 9 }).terminalLineHeight).toBe(2);
+  expect(sanitizeSettings({ terminalLineHeight: 0.5 }).terminalLineHeight).toBe(1);
+  expect(sanitizeSettings({ terminalLineHeight: "1.3" }).terminalLineHeight).toBe(1);
 });
 
 it("keeps the terminal cursor at a block that blinks unless a saved shape or blink says otherwise", () => {

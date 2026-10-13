@@ -95,6 +95,8 @@ export interface PaneTerminalProps {
   autoSelected?: boolean;
   /** xterm font size (settings) */
   terminalFontSize: number;
+  /** xterm lineHeight (settings) */
+  terminalLineHeight: number;
   /** one of several panes drawn side by side: under 80 columns its font shrinks to reach them */
   split?: boolean;
   /** xterm cursorStyle (settings); a program's own DECSCUSR still changes it, as before this setting existed */
@@ -146,6 +148,7 @@ export function PaneTerminal({
   active = true,
   autoSelected = false,
   terminalFontSize,
+  terminalLineHeight,
   split = false,
   terminalCursorStyle,
   terminalCursorBlink,
@@ -499,6 +502,7 @@ export function PaneTerminal({
       scrollback: 0,
       allowProposedApi: true,
       fontSize: terminalFontSize,
+      lineHeight: terminalLineHeight,
       // a chosen family follows in the font effect below, once its faces have loaded
       fontFamily: TERMINAL_FONT_STACK,
       theme: terminalTheme(theme, palette),
@@ -1727,8 +1731,9 @@ export function PaneTerminal({
       // a newer font, or an unmounted terminal, took over while the faces loaded
       if (superseded || termRef.current !== term) return;
       baseFontRef.current = terminalFontSize;
-      if (term.options.fontSize === terminalFontSize && term.options.fontFamily === fontFamily) return;
+      if (term.options.fontSize === terminalFontSize && term.options.fontFamily === fontFamily && term.options.lineHeight === terminalLineHeight) return;
       term.options.fontSize = terminalFontSize;
+      term.options.lineHeight = terminalLineHeight;
       term.options.fontFamily = fontFamily;
       if (observeRef.current || fixedGridRef.current || chatViewRef.current) return;
       try {
@@ -1744,7 +1749,7 @@ export function PaneTerminal({
     if (fontFamily === TERMINAL_FONT_STACK) apply();
     else void loadFontStack(fontFamily, terminalFontSize).then(apply);
     return () => { superseded = true; };
-  }, [terminalFontSize, fontFamily]);
+  }, [terminalFontSize, terminalLineHeight, fontFamily]);
 
   // the setting, a zoom or the last sibling closing need not resize the host: the observer may stay silent
   useEffect(() => {
