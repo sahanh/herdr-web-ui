@@ -6,6 +6,7 @@ import "./NewSessionDialog.css";
 import type { AgentKind } from "../../shared/protocol.ts";
 import { ApiError } from "../lib/api.ts";
 import { AgentPicker, rememberAgent, rememberedAgent } from "./AgentPicker.tsx";
+import { QuickStart, quickStartKinds } from "./QuickStart.tsx";
 import { DirectoryBrowser } from "./DirectoryBrowser.tsx";
 import { RecentFolderChips } from "./RecentFolderChips.tsx";
 import { useMachineApi, useMachineId } from "../lib/machineContext.tsx";
@@ -78,6 +79,8 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
   defaultCwdRef.current = defaultCwd;
   const prefillRef = useRef(prefill);
   prefillRef.current = prefill;
+  // the newest quick start, for the key handler bound once per opening
+  const quickStartRef = useRef<(kind: string) => void>(() => {});
 
   useEffect(() => {
     if (!open) return;
@@ -118,21 +121,33 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       // a native modal over it (Add PC, from the palette) takes its own Escape
-      if (event.key !== "Escape" || nativeModalOver(surface.current)) return;
+      if (nativeModalOver(surface.current)) return;
+      // a New tab's quick starts: 1, 2… start that one, unless the key is typing into a field
+      const quick = tab && !event.metaKey && !event.ctrlKey && !event.altKey && /^[1-9]$/.test(event.key)
+        && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement);
+      if (quick) {
+        const kind = quickStartKinds(agents)[Number(event.key) - 1];
+        if (kind === undefined) return;
+        event.preventDefault();
+        quickStartRef.current(kind);
+        return;
+      }
+      if (event.key !== "Escape") return;
       event.preventDefault();
       if (!pending) onClose();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose, pending]);
+  }, [open, onClose, pending, tab, agents]);
 
   if (!open) return null;
 
+  const selectedKind = agentKind;
   const selectedAgent = agents.find((agent) => agent.kind === agentKind);
   const pendingLabel = selectedAgent ? t("Starting {agent}… up to 60s", { agent: selectedAgent.label }) : t("Starting shell…");
   const fieldsDisabled = pending || createdPaneId !== null;
 
-  const startWorkspace = async (directory: string): Promise<void> => {
+  const startWorkspace = async (directory: string, agentKind = selectedKind): Promise<void> => {
     if (pending) return;
     if (createdPaneId !== null) { onCreated(createdPaneId, false); return; }
     setPending(true);
@@ -164,6 +179,13 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
     }
   };
 
+  const quickStart = (kind: string): void => {
+    if (fieldsDisabled) return;
+    setAgentKind(kind);
+    void startWorkspace(cwd, kind);
+  };
+  quickStartRef.current = quickStart;
+
   const closeFromScrim = (event: MouseEvent<HTMLDivElement>): void => {
     if (!pending && event.target === event.currentTarget) onClose();
   };
@@ -178,6 +200,7 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
           </button>
         </header>
         <div className="modal-body">
+          {tab && <QuickStart agents={agents} disabled={fieldsDisabled} onStart={quickStart} />}
           <div className="field">
             <span className="field-label" id="new-session-agent">{t("Agent")}</span>
             <AgentPicker ref={firstFieldRef} agents={agents} value={agentKind} disabled={fieldsDisabled} labelledBy="new-session-agent" onChange={setAgentKind} />
