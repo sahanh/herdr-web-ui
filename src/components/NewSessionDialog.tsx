@@ -165,7 +165,11 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
     setError(null);
     try {
       rememberAgent(agentKind);
-      const agent = agentKind ? { kind: agentKind } : null;
+      // a first prompt rides on the command line (`claude "…"`), as typed by hand; herdr refuses a
+      // newline in an argument, and one led by "-" would read as an option: those are pasted after
+      const firstLine = prompt.trim();
+      const asArgument = firstLine !== "" && !/[\r\n]/.test(firstLine) && !firstLine.startsWith("-");
+      const agent = agentKind ? { kind: agentKind, ...(asArgument ? { args: [firstLine] } : {}) } : null;
       // a tab keeps the workspace's folder, which the dialog shows and does not ask for
       const result = tab
         ? await createTab({ workspace_id: tab.workspaceId, cwd: tab.cwd, label: name.trim() || null, agent })
@@ -176,8 +180,8 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
         setCreatedPaneId(result.pane_id);
         return;
       }
-      // a first prompt goes in once herdr reports the agent ready: pasted whole, then its own Enter
-      if (agentKind && result.agent_started && prompt.trim()) {
+      // a first prompt that could not be an argument goes in once herdr reports the agent ready: pasted whole, then its own Enter
+      if (agentKind && result.agent_started && prompt.trim() && !asArgument) {
         try {
           await sendPaneText(result.pane_id, composerPayload(prompt, true));
           await new Promise((resolve) => window.setTimeout(resolve, PROMPT_ENTER_GAP_MS));
