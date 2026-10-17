@@ -38,6 +38,8 @@ export function useMachineApi() {
     setSplitRatio: (tab: string, path: boolean[], ratio: number) => api.setSplitRatio(tab, path, ratio, id),
     resizePane: (pane: string, direction: PaneDirection) => api.resizePane(pane, direction, id),
     clearPane: (pane: string) => api.clearPane(pane, id),
+    sendPaneText: (pane: string, text: string) => api.sendPaneText(pane, text, id),
+    sendPaneKeys: (pane: string, keys: string[]) => api.sendPaneKeys(pane, keys, id),
     renameWorkspace: (workspace: string, label: string) => api.renameWorkspace(workspace, label, id),
     moveWorkspace: (workspace: string, index: number) => api.moveWorkspace(workspace, index, id),
     fetchAgentKinds: () => api.fetchAgentKinds(id),

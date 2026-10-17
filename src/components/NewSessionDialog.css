@@ -247,3 +247,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* a quick start's first prompt */
+.new-session-prompt {
+  resize: vertical;
+  min-height: 5.5rem;
+  font: inherit;
+  line-height: 1.45;
+}

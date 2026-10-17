@@ -510,6 +510,16 @@ export async function clearPane(paneId: string, machineId = "local"): Promise<vo
   await sendJson(machinePath(machineId, "pane/clear"), "POST", { pane_id: paneId });
 }
 
+/** POST /api/pane/input: text typed into the pane as is (escape sequences included). */
+export async function sendPaneText(paneId: string, text: string, machineId = "local"): Promise<void> {
+  await sendJson(machinePath(machineId, "pane/input"), "POST", { pane_id: paneId, text });
+}
+
+/** POST /api/pane/keys: named keys sent to the pane (`Enter`, `ctrl+c`…). */
+export async function sendPaneKeys(paneId: string, keys: string[], machineId = "local"): Promise<void> {
+  await sendJson(machinePath(machineId, "pane/keys"), "POST", { pane_id: paneId, keys });
+}
+
 /** GET /api/agents: the agent kinds herdr can start, for the new-session dialog. */
 export async function fetchAgentKinds(machineId = "local"): Promise<AgentKind[]> {
   return (await getJson<{ agents: AgentKind[] }>(machinePath(machineId, "agents"))).agents;

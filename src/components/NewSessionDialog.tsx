@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from "react";
 import { FolderOpen, X } from "lucide-react";
 
 import "./NewSessionDialog.css";
@@ -11,6 +11,7 @@ import { DirectoryBrowser } from "./DirectoryBrowser.tsx";
 import { RecentFolderChips } from "./RecentFolderChips.tsx";
 import { useMachineApi, useMachineId } from "../lib/machineContext.tsx";
 import { useT } from "../lib/i18n.ts";
+import { composerPayload } from "../lib/compose.ts";
 import { nativeModalOver, useFocusTrap } from "../lib/useFocusTrap.ts";
 import { useSheetSwipe } from "../lib/sheets.ts";
 import { passingFolder, recentDirectories } from "../lib/recent-directories.ts";
@@ -47,6 +48,11 @@ export interface DialogFields {
   agent: string | null;
 }
 
+/** the gap between pasting a first prompt and its Enter, as the server's submit leaves (SUBMIT_DELAY_MS) */
+const PROMPT_ENTER_GAP_MS = 120;
+/** quick starts that ask for a first prompt before starting */
+const PROMPTED_KINDS: ReadonlySet<string> = new Set(["claude"]);
+
 /** how long the fields rest before the address follows them: Safari refuses a burst of history writes */
 const DRAFT_MS = 400;
 /** recent folders offered: one row a phone swipes sideways; a wider screen fits what one row holds and lists the rest under "+N" */
@@ -60,7 +66,7 @@ function directoryBasename(value: string): string {
 export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCreated, machineName, prefill = null, onDraft, worktrees = [] }: NewSessionDialogProps) {
   const t = useT();
   const machineId = useMachineId();
-  const { createTab, createWorkspace, fetchAgentKinds } = useMachineApi();
+  const { createTab, createWorkspace, fetchAgentKinds, sendPaneText, sendPaneKeys } = useMachineApi();
   const [agents, setAgents] = useState<AgentKind[]>([]);
   const [agentKind, setAgentKind] = useState(rememberedAgent);
   const [cwd, setCwd] = useState(defaultCwd ?? "");
@@ -69,6 +75,9 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
   const [error, setError] = useState<string | null>(null);
   const [createdPaneId, setCreatedPaneId] = useState<string | null>(null);
   const [browsing, setBrowsing] = useState(false);
+  // a quick start that asks for a first prompt: the kind it will start, and the prompt so far
+  const [promptFor, setPromptFor] = useState<string | null>(null);
+  const [firstPrompt, setFirstPrompt] = useState("");
   const [recentFolders, setRecentFolders] = useState(() => recentDirectories.read(machineId));
   // folders kept before worktrees and temporary folders were left out are left out here too
   const shownFolders = recentFolders.filter((path) => !passingFolder(path, worktrees)).slice(0, RECENT_FOLDERS_SHOWN);
@@ -91,6 +100,8 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
     setPending(false);
     setCreatedPaneId(null);
     setBrowsing(false);
+    setPromptFor(null);
+    setFirstPrompt("");
     setRecentFolders(recentDirectories.read(machineId));
     const remembered = rememberedAgent();
     const stored = filled?.agent ?? remembered;
@@ -147,7 +158,7 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
   const pendingLabel = selectedAgent ? t("Starting {agent}… up to 60s", { agent: selectedAgent.label }) : t("Starting shell…");
   const fieldsDisabled = pending || createdPaneId !== null;
 
-  const startWorkspace = async (directory: string, agentKind = selectedKind): Promise<void> => {
+  const startWorkspace = async (directory: string, agentKind = selectedKind, prompt = ""): Promise<void> => {
     if (pending) return;
     if (createdPaneId !== null) { onCreated(createdPaneId, false); return; }
     setPending(true);
@@ -164,6 +175,19 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
         setError(result.error.message);
         setCreatedPaneId(result.pane_id);
         return;
+      }
+      // a first prompt goes in once herdr reports the agent ready: pasted whole, then its own Enter
+      if (agentKind && result.agent_started && prompt.trim()) {
+        try {
+          await sendPaneText(result.pane_id, composerPayload(prompt, true));
+          await new Promise((resolve) => window.setTimeout(resolve, PROMPT_ENTER_GAP_MS));
+          await sendPaneKeys(result.pane_id, ["Enter"]);
+        } catch (reason: unknown) {
+          setPending(false);
+          setError(reason instanceof Error ? reason.message : String(reason));
+          setCreatedPaneId(result.pane_id);
+          return;
+        }
       }
       if (!tab && (!agentKind || result.agent_started)) {
         setRecentFolders(recentDirectories.remember(machineId, [directory.trim()], true));
@@ -182,7 +206,23 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
   const quickStart = (kind: string): void => {
     if (fieldsDisabled) return;
     setAgentKind(kind);
-    void startWorkspace(cwd, kind);
+    if (PROMPTED_KINDS.has(kind)) setPromptFor(kind);
+    else void startWorkspace(cwd, kind);
+  };
+  const startPrompted = (): void => {
+    if (promptFor !== null) void startWorkspace(cwd, promptFor, firstPrompt);
+  };
+  // Enter starts (an empty prompt starts the agent bare), Shift+Enter is a new line, Escape goes back
+  const onPromptKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      startPrompted();
+    } else if (event.key === "Escape" && !pending) {
+      event.preventDefault();
+      event.stopPropagation();
+      setPromptFor(null);
+    }
   };
   quickStartRef.current = quickStart;
 
@@ -192,7 +232,7 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
 
   return (
     <div className="modal-scrim new-session-scrim" onMouseDown={closeFromScrim}>
-      <form ref={surface} className="modal new-session-modal" role="dialog" aria-modal="true" aria-labelledby="new-session-title" tabIndex={-1} onSubmit={(event) => { event.preventDefault(); void startWorkspace(cwd); }}>
+      <form ref={surface} className="modal new-session-modal" role="dialog" aria-modal="true" aria-labelledby="new-session-title" tabIndex={-1} onSubmit={(event) => { event.preventDefault(); if (promptFor !== null) startPrompted(); else void startWorkspace(cwd); }}>
         <header className="modal-header">
           <h2 className="modal-title" id="new-session-title">{tab ? `${t("New tab")} · ${tab.workspaceLabel}` : `${t("New workspace")} · ${machineName ?? machineId}`}</h2>
           <button type="button" className="icon-button" aria-label={t("Close dialog")} disabled={pending} onClick={onClose}>
@@ -200,11 +240,20 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
           </button>
         </header>
         <div className="modal-body">
-          {tab && <QuickStart agents={agents} disabled={fieldsDisabled} onStart={quickStart} />}
-          <div className="field">
-            <span className="field-label" id="new-session-agent">{t("Agent")}</span>
-            <AgentPicker ref={firstFieldRef} agents={agents} value={agentKind} disabled={fieldsDisabled} labelledBy="new-session-agent" onChange={setAgentKind} />
-          </div>
+          {tab && promptFor === null && <QuickStart agents={agents} disabled={fieldsDisabled} onStart={quickStart} />}
+          {promptFor !== null ? (
+            <label className="field">
+              <span className="field-label">{t("First prompt")} · {agents.find((agent) => agent.kind === promptFor)?.label ?? promptFor}</span>
+              <textarea className="input new-session-prompt" value={firstPrompt} disabled={fieldsDisabled} rows={4} autoFocus
+                placeholder={t("What should it do? (optional)")} onChange={(event) => setFirstPrompt(event.target.value)} onKeyDown={onPromptKeyDown} />
+              <span className="field-hint">{t("Enter to start · Shift+Enter for a new line · Esc to go back")}</span>
+            </label>
+          ) : (
+            <div className="field">
+              <span className="field-label" id="new-session-agent">{t("Agent")}</span>
+              <AgentPicker ref={firstFieldRef} agents={agents} value={agentKind} disabled={fieldsDisabled} labelledBy="new-session-agent" onChange={setAgentKind} />
+            </div>
+          )}
           {tab ? (
             <div className="field">
               <span className="field-label">{t("Directory")}</span>
