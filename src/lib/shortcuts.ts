@@ -86,6 +86,17 @@ export function matchShortcut(event: ShortcutEventLike, platformIsMac: boolean, 
   return id && !Object.hasOwn(overrides, id) ? id : null;
 }
 
+/**
+ * Ctrl+N on a Mac opens New tab (mission control). Outside the Mod+Shift scheme and not
+ * customizable: on a Mac, Ctrl is free of browser bindings, so the plain chord gets through. It takes
+ * the key from the terminal and text fields (readline's next-history, Cocoa's next line).
+ */
+export function isNewTabShortcut(event: ShortcutEventLike, platformIsMac: boolean): boolean {
+  if (!platformIsMac || event.isComposing || event.keyCode === 229) return false;
+  if (!event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return false;
+  return event.code === "KeyN" || (!event.code && event.key.toLowerCase() === "n");
+}
+
 /** Mod+Shift+Space, held to dictate. matchShortcut never returns "voice": it has no action. */
 export function isVoiceShortcut(event: ShortcutEventLike, platformIsMac: boolean): boolean {
   const hasMod = platformIsMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
@@ -123,7 +134,8 @@ export function keepsArrowsForText(target: KeyTargetLike | EventTarget | null): 
  * app shortcut for the pane: its key handler asks this first.
  */
 export function isAppShortcut(event: ShortcutEventLike, overrides: ShortcutOverrides = {}): boolean {
-  return matchShortcut(event, isMacPlatform(), overrides) !== null;
+  const platformIsMac = isMacPlatform();
+  return matchShortcut(event, platformIsMac, overrides) !== null || isNewTabShortcut(event, platformIsMac);
 }
 
 export function isMacPlatform(): boolean {
@@ -146,6 +158,11 @@ export function useShortcuts(actions: AppActions, enabled: boolean): void {
     if (!enabled) return;
     const platformIsMac = isMacPlatform();
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (isNewTabShortcut(event, platformIsMac)) {
+        event.preventDefault();
+        actions.openNewTab();
+        return;
+      }
       const shortcut = matchShortcut(event, platformIsMac, settings.shortcutOverrides);
       if (shortcut === null) return;
       if (event.key.startsWith("Arrow") && keepsArrowsForText(event.target)) return;

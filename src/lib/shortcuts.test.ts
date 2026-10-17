@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { isAppShortcut, isMacPlatform, matchShortcut, type ShortcutEventLike, keepsArrowsForText, shortcutConflict, shortcutDisplayKeys, shortcutKeys } from "./shortcuts.ts";
+import { isAppShortcut, isMacPlatform, isNewTabShortcut, matchShortcut, type ShortcutEventLike, keepsArrowsForText, shortcutConflict, shortcutDisplayKeys, shortcutKeys } from "./shortcuts.ts";
 import { isReservedShortcutKey, sanitizeShortcutOverrides } from "./shortcutBindings.ts";
 
 function keyEvent(key: string, patch: Partial<ShortcutEventLike> = {}): ShortcutEventLike {
@@ -156,5 +156,15 @@ describe("isReservedShortcutKey", () => {
     expect(overrides).toEqual({ "new-session": "t" });
     expect(matchShortcut(keyEvent("t", { ctrlKey: true }), false, overrides)).toBe("new-session");
     expect(matchShortcut(keyEvent("n", { ctrlKey: true }), false)).toBe("new-session");
+  });
+});
+
+describe("isNewTabShortcut", () => {
+  it("Ctrl+N on a Mac, nothing else", () => {
+    expect(isNewTabShortcut(keyEvent("n", { ctrlKey: true, shiftKey: false, code: "KeyN" }), true)).toBe(true);
+    expect(isNewTabShortcut(keyEvent("n", { ctrlKey: true, shiftKey: false, code: "KeyN" }), false)).toBe(false);
+    expect(isNewTabShortcut(keyEvent("n", { metaKey: true, shiftKey: false, code: "KeyN" }), true)).toBe(false);
+    expect(isNewTabShortcut(keyEvent("N", { ctrlKey: true, code: "KeyN" }), true)).toBe(false);
+    expect(isNewTabShortcut(keyEvent("n", { ctrlKey: true, shiftKey: false, altKey: true, code: "KeyN" }), true)).toBe(false);
   });
 });
