@@ -15,6 +15,7 @@ import { composerPayload } from "../lib/compose.ts";
 import { nativeModalOver, useFocusTrap } from "../lib/useFocusTrap.ts";
 import { useSheetSwipe } from "../lib/sheets.ts";
 import { passingFolder, recentDirectories } from "../lib/recent-directories.ts";
+import { joinGroupWhenReady, takeGroupJoin, type GroupJoin } from "../lib/tabGroups.ts";
 
 /** The dialog as New tab: the workspace the tab joins, whose folder it uses, and the number herdr will give it. */
 export interface NewTabTarget {
@@ -90,9 +91,13 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
   prefillRef.current = prefill;
   // the newest quick start, for the key handler bound once per opening
   const quickStartRef = useRef<(kind: string) => void>(() => {});
+  // the tab group a + in the strip asked this tab for (lib/tabGroups.ts)
+  const groupJoin = useRef<GroupJoin | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    const join = takeGroupJoin();
+    groupJoin.current = tab && join?.machineId === machineId ? join : null;
     const filled = prefillRef.current;
     setCwd(filled?.cwd ?? defaultCwdRef.current ?? "");
     setName(filled?.name ?? "");
@@ -174,6 +179,7 @@ export function NewSessionDialog({ open, defaultCwd, tab = null, onClose, onCrea
       const result = tab
         ? await createTab({ workspace_id: tab.workspaceId, cwd: tab.cwd, label: name.trim() || null, agent })
         : await createWorkspace({ cwd: directory.trim() || null, label: name.trim() || null, agent });
+      if (tab && groupJoin.current) { joinGroupWhenReady(groupJoin.current, result.pane_id); groupJoin.current = null; }
       if (agentKind && !result.agent_started && result.error?.message) {
         setPending(false);
         setError(result.error.message);

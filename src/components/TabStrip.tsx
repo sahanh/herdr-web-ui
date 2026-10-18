@@ -6,11 +6,12 @@
  * That menu also carries the open pane's actions, so a lone pane shows no ellipsis of its own.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { ArrowLeft, ArrowRight, Ellipsis, Pencil, Plus, Terminal, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, Ellipsis, Layers, LayersPlus, Pencil, Plus, Terminal, Ungroup, X } from "lucide-react";
 
 import "./TabStrip.css";
 
 import type { HerdrPane, HerdrTab, PaneInfo, SessionSnapshot, WorkspaceInfo } from "../../shared/protocol.ts";
+import type { TabGroup } from "../../shared/tab-groups.ts";
 import { ApiError } from "../lib/api.ts";
 import { useFacesArrived } from "../lib/fontFaces.ts";
 import { focusWorkspaceListToggle } from "../lib/focus.ts";
@@ -24,6 +25,7 @@ import { useMachineApi, useMachineId } from "../lib/machineContext.tsx";
 import { useMediaQuery } from "../lib/useMediaQuery.ts";
 import { useTabReorder } from "../lib/useTabReorder.ts";
 import { paneStatus, rollupStatus } from "../lib/status.ts";
+import { askGroupJoin, newTabGroupId, pendingGroupJoins, removeTabGroup, saveTabGroup, settleGroupJoin, useTabGroups } from "../lib/tabGroups.ts";
 import { AgentMark } from "./AgentMark.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { displayPaneTitle } from "./Sidebar.tsx";
@@ -33,6 +35,11 @@ const said = (reason: unknown): string => reason instanceof ApiError ? reason.de
 
 /** the pane each tab was last seen on, per PC: a tab clicked again opens where it was left */
 const lastViewed = new Map<string, string>();
+/** the tab last open in each tab group, per PC: a group opened again opens there */
+const lastInGroup = new Map<string, string>();
+
+/** a tab group of this workspace as the strip draws it: its tabs that are still here, in herdr's order */
+interface ShownGroup { id: string; name: string; record: TabGroup; tabs: HerdrTab[] }
 
 export interface TabStripProps {
   snapshot: SessionSnapshot;
@@ -54,8 +61,13 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
   // drawn there, so an approval card keeps its options in reach; its actions stay in the header
   const cramped = useMediaQuery("(max-width: 768px) and (max-height: 600px)");
   const strip = useRef<HTMLDivElement>(null);
+  // the open tab group's own row of tabs, under the strip
+  const groupRow = useRef<HTMLDivElement>(null);
   const [picker, setPicker] = useState<{ anchor: HTMLElement; tab: HerdrTab; point?: { x: number; y: number }; previousFocus: HTMLElement | null; touch: boolean } | null>(null);
   const [editing, setEditing] = useState<{ tabId: string; value: string } | null>(null);
+  const [editingGroup, setEditingGroup] = useState<{ groupId: string; value: string } | null>(null);
+  const groupNamed = useRef(false);
+  const [groupMenu, setGroupMenu] = useState<{ anchor: HTMLElement; groupId: string; point?: { x: number; y: number }; previousFocus: HTMLElement | null } | null>(null);
   // the name just sent, shown until herdr's snapshot carries it
   const [sent, setSent] = useState<{ tabId: string; label: string } | null>(null);
   const [confirm, setConfirm] = useState<{ tab: HerdrTab; title: string; body: string } | null>(null);
@@ -68,6 +80,12 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
   const closed = useRef<{ tabId: string; beside: string } | null>(null);
   // what is on screen now, for a close that answers after the selection or the PC has moved on
   const latest = useRef({ machineId, workspaceId: workspace.workspace_id, tabId: selectedPane.tab_id });
+  // a tab's button is in the strip, or in the open group's row
+  const tabButton = (tabId: string): HTMLElement | null => {
+    const selector = `[role="tab"][data-tab-id="${CSS.escape(tabId)}"]`;
+    return strip.current?.querySelector<HTMLElement>(selector) ?? groupRow.current?.querySelector<HTMLElement>(selector) ?? null;
+  };
+  const inStrip = (element: Element | null): boolean => !!element && (!!strip.current?.contains(element) || !!groupRow.current?.contains(element));
   const stripTab = (): HTMLElement | null => strip.current?.querySelector<HTMLElement>('.tab-strip-item.is-active [role="tab"]')
     ?? strip.current?.querySelector<HTMLElement>('[role="tab"]') ?? null;
   latest.current = { machineId, workspaceId: workspace.workspace_id, tabId: selectedPane.tab_id };
@@ -77,7 +95,7 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
     if (previousOwner.current === owner) return;
     previousOwner.current = owner;
     // Native IDs can repeat on another PC. A pending dialog never changes its target PC.
-    setPicker(null); setEditing(null); setConfirm(null); setSent(null); setError(null);
+    setPicker(null); setEditing(null); setConfirm(null); setSent(null); setError(null); setEditingGroup(null); setGroupMenu(null);
     refocus.current = null; closed.current = null;
   }, [owner]);
   const panes = rosterPanes(snapshot.panes.filter((pane) => pane.workspace_id === workspace.workspace_id), selectedPane.pane_id);
@@ -86,6 +104,52 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
   const reorder = useTabReorder({ owner: `${machineId}:${workspace.workspace_id}`, tabs, strip, moveTab,
     failed: (reason) => setError(t("Move failed: {reason}", { reason: said(reason) })),
     stale: () => setError(t("Tab order did not refresh. Try again.")),
+  });
+  // Tab groups (lib/tabGroups.ts): this workspace's, in the order of their first tab. A group
+  // whose tabs have all gone is gone too: the effect below tells the server.
+  const allGroups = useTabGroups();
+  const groups: ShownGroup[] = Object.entries(allGroups)
+    .filter(([, group]) => group.machine_id === machineId && group.workspace_id === workspace.workspace_id)
+    .map(([id, group]) => ({ id, name: group.name, record: group, tabs: tabs.filter((tab) => group.tab_ids.includes(tab.tab_id)) }))
+    .filter((group) => group.tabs.length > 0)
+    .sort((a, b) => tabs.indexOf(a.tabs[0]!) - tabs.indexOf(b.tabs[0]!));
+  const groupOf = (tabId: string): ShownGroup | undefined => groups.find((group) => group.tabs.some((tab) => tab.tab_id === tabId));
+  const selectedGroupId = groupOf(selectedPane.tab_id)?.id ?? null;
+  // the group whose row shows: the open tab's, until its chip folds it, or one opened from its chip
+  const [openGroupId, setOpenGroupId] = useState<string | null>(selectedGroupId);
+  useLayoutEffect(() => { setOpenGroupId(selectedGroupId); }, [selectedPane.tab_id, selectedGroupId]);
+  useEffect(() => {
+    if (selectedGroupId) lastInGroup.set(`${machineId}:${selectedGroupId}`, selectedPane.tab_id);
+  }, [machineId, selectedGroupId, selectedPane.tab_id]);
+  const groupFailed = (reason: unknown): void => setError(t("Tab group change failed: {reason}", { reason: said(reason) }));
+  // each group's tabs that left (closed here, in the TUI, on another device) leave it; one left
+  // with none, or whose workspace closed, is removed. Tried once per change, so a refusal does not repeat on every render.
+  const pruned = useRef(new Set<string>());
+  useEffect(() => {
+    if (tabs.length === 0) return;
+    const here = new Set(tabs.map((tab) => tab.tab_id));
+    const workspaces = new Set(snapshot.workspaces.map((entry) => entry.workspace_id));
+    for (const [id, group] of Object.entries(allGroups)) {
+      if (group.machine_id !== machineId) continue;
+      const kept = group.workspace_id === workspace.workspace_id ? group.tab_ids.filter((tabId) => here.has(tabId))
+        : workspaces.has(group.workspace_id) ? group.tab_ids : [];
+      if (kept.length === group.tab_ids.length) continue;
+      const key = JSON.stringify([id, kept]);
+      if (pruned.current.has(key)) continue;
+      pruned.current.add(key);
+      void (kept.length === 0 ? removeTabGroup(id) : saveTabGroup(id, { ...group, tab_ids: kept })).catch(() => {});
+    }
+  });
+  // a tab made from a group's + joins it once the snapshot shows its pane
+  useEffect(() => {
+    for (const join of pendingGroupJoins(machineId)) {
+      const pane = snapshot.panes.find((candidate) => candidate.pane_id === join.paneId);
+      if (!pane) continue;
+      settleGroupJoin(join.paneId);
+      const group = allGroups[join.groupId];
+      if (!group || group.workspace_id !== pane.workspace_id || group.tab_ids.includes(pane.tab_id)) continue;
+      void saveTabGroup(join.groupId, { ...group, tab_ids: [...group.tab_ids, pane.tab_id] }).catch(groupFailed);
+    }
   });
   const nameOf = (tab: HerdrTab): string => sent?.tabId === tab.tab_id ? sent.label : tabLabel(tab, t, tabs.findIndex((candidate) => candidate.tab_id === tab.tab_id) + 1);
 
@@ -99,6 +163,8 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
     if (picker && !here(picker.tab.tab_id)) setPicker(null);
     if (editing && !here(editing.tabId)) setEditing(null);
     if (confirm && !here(confirm.tab.tab_id)) setConfirm(null);
+    if (editingGroup && !groups.some((group) => group.id === editingGroup.groupId)) setEditingGroup(null);
+    if (groupMenu && !groups.some((group) => group.id === groupMenu.groupId)) setGroupMenu(null);
     if (sent && tabs.find((tab) => tab.tab_id === sent.tabId)?.label.trim() === sent.label) setSent(null);
   });
   // A touch-only trigger can disappear without crossing RowMenu's narrower sheet breakpoint.
@@ -107,10 +173,10 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
     if (picker?.touch && (!touchMenu || picker.tab.tab_id !== selectedPane.tab_id)) setPicker(null);
   }, [touchMenu, selectedPane.tab_id, picker]);
   useLayoutEffect(() => {
-    if (editing || !refocus.current) return;
-    strip.current?.querySelector<HTMLElement>(`[role="tab"][data-tab-id="${CSS.escape(refocus.current)}"]`)?.focus();
+    if (editing || editingGroup || !refocus.current) return;
+    (tabButton(refocus.current) ?? strip.current?.querySelector<HTMLElement>(`[role="tab"][data-group-id="${CSS.escape(refocus.current)}"]`))?.focus();
     refocus.current = null;
-  }, [editing]);
+  }, [editing, editingGroup]);
   // once the snapshot has lost a closed tab, the focus it held goes to the tab beside it, or,
   // when the strip went with it (one pane left), where a closed row's focus goes
   useLayoutEffect(() => {
@@ -118,8 +184,8 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
     if (!was || tabs.some((tab) => tab.tab_id === was.tabId)) return;
     closed.current = null;
     const active = document.activeElement;
-    if (active && active !== document.body && !strip.current?.contains(active)) return;
-    const beside = strip.current?.querySelector<HTMLElement>(`[role="tab"][data-tab-id="${CSS.escape(was.beside)}"]`) ?? stripTab();
+    if (active && active !== document.body && !inStrip(active)) return;
+    const beside = tabButton(was.beside) ?? stripTab();
     if (beside) beside.focus(); else focusWorkspaceListToggle();
   });
   // A tab that held the focus and went (closed here, in the TUI, or picked as the one beside a
@@ -194,7 +260,7 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
   };
 
   const focusTab = (tabId: string): void => {
-    window.requestAnimationFrame(() => strip.current?.querySelector<HTMLElement>(`[role="tab"][data-tab-id="${CSS.escape(tabId)}"]`)?.focus());
+    window.requestAnimationFrame(() => tabButton(tabId)?.focus());
   };
 
   const beginRename = (tab: HerdrTab): void => {
@@ -237,7 +303,7 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
     if (!beside) { focusWorkspaceListToggle(); return; }
     const pane = paneFor(beside);
     if (latest.current.tabId === tab.tab_id && pane) onSelectPane(pane.pane_id);
-    if (strip.current?.contains(document.activeElement) || document.activeElement === document.body) focusTab(beside.tab_id);
+    if (inStrip(document.activeElement) || document.activeElement === document.body) focusTab(beside.tab_id);
   };
   const requestClose = (tab: HerdrTab): void => {
     setError(null);
@@ -256,15 +322,69 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
     });
   };
 
+  const putGroup = (id: string, group: TabGroup): void => { void saveTabGroup(id, group).catch(groupFailed); };
+  const addToNewGroup = (tab: HerdrTab): void => {
+    setError(null);
+    const id = newTabGroupId();
+    putGroup(id, { machine_id: machineId, workspace_id: workspace.workspace_id, name: t("New group"), tab_ids: [tab.tab_id] });
+    setOpenGroupId(id);
+    groupNamed.current = false;
+    setEditingGroup({ groupId: id, value: "" });
+  };
+  const addToGroup = (tab: HerdrTab, group: ShownGroup): void => putGroup(group.id, { ...group.record, tab_ids: [...group.record.tab_ids, tab.tab_id] });
+  const leaveGroup = (tab: HerdrTab, group: ShownGroup): void => putGroup(group.id, { ...group.record, tab_ids: group.record.tab_ids.filter((tabId) => tabId !== tab.tab_id) });
+  const ungroup = (group: ShownGroup): void => { void removeTabGroup(group.id).catch(groupFailed); };
+  const newTabInGroup = (group: ShownGroup): void => { askGroupJoin({ machineId, groupId: group.id }); onNewTab(); };
+  const beginGroupRename = (group: ShownGroup): void => { setError(null); groupNamed.current = false; setEditingGroup({ groupId: group.id, value: group.name }); };
+  // Enter, or the field losing the focus, keeps the name typed; Escape keeps the old one. The
+  // field's blur as it goes after either finds the name already settled.
+  const saveGroupName = (group: ShownGroup): void => {
+    if (groupNamed.current) return;
+    groupNamed.current = true;
+    const name = editingGroup?.value.trim() ?? "";
+    refocus.current = group.id;
+    setEditingGroup(null);
+    if (name !== "" && name !== group.name) putGroup(group.id, { ...group.record, name });
+  };
+  // a group's chip opens its row on the tab last open in it, and folds the row when it shows
+  const toggleGroup = (group: ShownGroup): void => {
+    if (openGroupId === group.id) { setOpenGroupId(null); return; }
+    setOpenGroupId(group.id);
+    if (group.tabs.some((tab) => tab.tab_id === selectedPane.tab_id)) return;
+    const last = lastInGroup.get(`${machineId}:${group.id}`);
+    const tab = group.tabs.find((candidate) => candidate.tab_id === last) ?? group.tabs[0];
+    const pane = tab && paneFor(tab);
+    if (pane) onSelectPane(pane.pane_id);
+  };
+  const openGroupMenu = (event: MouseEvent<HTMLElement>, group: ShownGroup): void => {
+    setGroupMenu({ anchor: event.currentTarget, groupId: group.id,
+      point: event.clientX !== 0 || event.clientY !== 0 ? { x: event.clientX, y: event.clientY } : undefined,
+      previousFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null });
+  };
+  const groupMenuItems = (group: ShownGroup): RowMenuItem[] => [
+    { id: "group-new-tab", label: t("New tab in this group"), icon: Plus, run: () => newTabInGroup(group) },
+    { id: "group-rename", label: t("Rename group"), icon: Pencil, run: () => beginGroupRename(group) },
+    { id: "group-ungroup", label: t("Ungroup"), icon: Ungroup, run: () => ungroup(group) },
+  ];
+
   // arrows move between the tabs; Enter or Space on one opens it, as any button; F2 names it, Delete closes it
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const buttons = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
     const index = buttons.indexOf(document.activeElement as HTMLElement);
     if (index < 0) return;
+    // a group's chip: its menu, or F2 to name it
+    const chipGroup = groups.find((group) => group.id === buttons[index]?.dataset["groupId"]);
+    if (chipGroup && (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey) || event.key === "F2")) {
+      event.preventDefault();
+      if (event.repeat) return;
+      if (event.key === "F2") beginGroupRename(chipGroup);
+      else setGroupMenu({ anchor: buttons[index]!, groupId: chipGroup.id, previousFocus: buttons[index]! });
+      return;
+    }
     if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       event.preventDefault(); event.stopPropagation();
       const tabId = buttons[index]?.dataset["tabId"];
-      if (tabId && !event.repeat) reorder.moveAdjacent(tabId, event.key === "ArrowLeft" ? -1 : 1);
+      if (tabId && !event.repeat && groups.length === 0) reorder.moveAdjacent(tabId, event.key === "ArrowLeft" ? -1 : 1);
       return;
     }
     if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
@@ -312,104 +432,192 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
       })),
       paneItems,
       tabActions(tab),
+      groupActions(tab),
     ].filter((group) => group.length > 0);
     return groups.flatMap((group, at) => at === 0 ? group : group.map((item, index) => index === 0 ? { ...item, divider: true } : item));
   };
   const tabActions = (tab: HerdrTab): RowMenuItem[] => [
-    ...(!reorder.moving && tabs.findIndex((entry) => entry.tab_id === tab.tab_id) > 0
+    ...(!reorder.moving && groups.length === 0 && tabs.findIndex((entry) => entry.tab_id === tab.tab_id) > 0
       ? [{ id: "move-left", label: t("Move tab left"), icon: ArrowLeft, run: () => reorder.moveAdjacent(tab.tab_id, -1) }] : []),
-    ...(!reorder.moving && tabs.findIndex((entry) => entry.tab_id === tab.tab_id) < tabs.length - 1
+    ...(!reorder.moving && groups.length === 0 && tabs.findIndex((entry) => entry.tab_id === tab.tab_id) < tabs.length - 1
       ? [{ id: "move-right", label: t("Move tab right"), icon: ArrowRight, run: () => reorder.moveAdjacent(tab.tab_id, 1) }] : []),
     { id: "new-tab", label: t("New tab"), icon: Plus, run: onNewTab },
     { id: "rename-tab", label: t("Rename tab"), icon: Pencil, run: () => beginRename(tab) },
     { id: "close-tab", label: t("Close tab"), icon: X, danger: true, run: () => requestClose(tab) },
   ];
+  const groupActions = (tab: HerdrTab): RowMenuItem[] => {
+    const own = groupOf(tab.tab_id);
+    return [
+      own ? { id: "leave-group", label: t("Remove from group"), icon: Ungroup, run: () => leaveGroup(tab, own) }
+        : { id: "new-group", label: t("Add to new group"), icon: LayersPlus, run: () => addToNewGroup(tab) },
+      ...groups.filter((group) => group !== own).map((group): RowMenuItem => ({
+        id: `group:${group.id}`, label: t("Move to group {group}", { group: group.name }), icon: Layers, run: () => addToGroup(tab, group),
+      })),
+    ];
+  };
 
   // the pane region every tab governs, as App names it. App gives that region the tabpanel role
   // only while the pane's own tab is in this snapshot (paneTabPanelLabel); the same call answers
   // here, so a tab never claims to control a panel that is not standing there as one.
   const panePanel = paneTabPanelLabel(snapshot, selectedPane, t) !== null ? PANE_TABPANEL_ID : undefined;
+  const renderTab = (tab: HerdrTab, index: number) => {
+    const active = tab.tab_id === selectedPane.tab_id;
+    const own = panesOf(tab);
+    // Settle each pane's wait before rolling up, so a sibling's RUN or DONE stays visible.
+    const status = rollupStatus(own.map((pane) => paneStatus(pane as HerdrPane)));
+    const pickerOpen = picker?.tab.tab_id === tab.tab_id;
+    const name = nameOf(tab);
+    return (
+      <div className={`tab-strip-item${active ? " is-active" : ""}${own.length > 1 ? " has-panes" : ""}${editing?.tabId === tab.tab_id ? " is-editing" : ""}${reorder.drag?.tabId === tab.tab_id ? " is-dragging" : ""}${reorder.drag?.boundary === index ? " is-drop-before" : ""}${reorder.drag?.boundary === tabs.length && index === tabs.length - 1 ? " is-drop-after" : ""}`} key={tab.tab_id}>
+        {editing?.tabId === tab.tab_id ? (
+          <input
+            className="input tab-strip-rename"
+            aria-label={t("Tab name")}
+            autoFocus
+            size={Math.max(8, editing.value.length + 1)}
+            maxLength={80}
+            placeholder={name}
+            value={editing.value}
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => setEditing({ tabId: tab.tab_id, value: event.target.value })}
+            onBlur={() => setEditing(null)}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              // an IME's Enter and Escape are the composition's, not the field's
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+              if (event.key === "Enter") saveRename(tab);
+              if (event.key === "Escape") { refocus.current = tab.tab_id; setEditing(null); }
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            role="tab"
+            className="tab-strip-tab"
+            data-tab-id={tab.tab_id}
+            aria-selected={active}
+            aria-haspopup="menu"
+            aria-keyshortcuts="Shift+F10 Alt+Shift+ArrowLeft Alt+Shift+ArrowRight"
+            aria-controls={panePanel}
+            tabIndex={active ? 0 : -1}
+            title={own.length === 1 && own[0] ? displayPaneTitle(own[0]) : t("{n} panes", { n: own.length })}
+            onPointerDown={groups.length === 0 ? (event) => reorder.onPointerDown(event, tab.tab_id) : undefined}
+            onPointerMove={reorder.onPointerMove}
+            onPointerUp={reorder.onPointerUp}
+            onPointerCancel={reorder.cancelDrag}
+            onLostPointerCapture={reorder.cancelDrag}
+            onDragStart={(event) => event.preventDefault()}
+            onMouseDown={(event) => { if (event.button === 2 || (event.button === 0 && event.ctrlKey)) event.preventDefault(); }}
+            onClick={(event) => {
+              if (reorder.consumeClick(event.detail) || event.ctrlKey) return;
+              event.currentTarget.focus({ preventScroll: true });
+              const pane = paneFor(tab);
+              if (pane && pane.pane_id !== selectedPane.pane_id) onSelectPane(pane.pane_id);
+            }}
+            onDoubleClick={() => beginRename(tab)}
+            onContextMenu={(event) => { event.preventDefault(); openPicker(event, tab); }}
+            // the middle button closes a tab, as it does a browser's
+            onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); requestClose(tab); } }}
+          >
+            {(status === "working" || status === "blocked" || status === "waiting" || status === "done") && <span className="tab-strip-dot" data-status={status} aria-hidden="true" />}
+            <span className="tab-strip-label">{name}</span>
+          </button>
+        )}
+        {touchMenu && active && editing?.tabId !== tab.tab_id && <button type="button" className="tab-strip-menu" aria-label={t("Actions for {tab}", { tab: name })} aria-haspopup="menu" aria-expanded={pickerOpen} onClick={(event) => openPicker(event, tab)}>
+          <Ellipsis aria-hidden="true" />
+        </button>}
+      </div>
+    );
+  };
+  // a group's chip: its name, a dot for each of its tabs (a blocked agent shows while folded), and the fold
+  const renderGroup = (group: ShownGroup) => {
+    const active = group.tabs.some((tab) => tab.tab_id === selectedPane.tab_id);
+    const open = openGroupId === group.id;
+    return (
+      <div className={`tab-strip-item tab-strip-group${active ? " is-active" : ""}${open ? " is-open" : ""}`} key={`group:${group.id}`}>
+        {editingGroup?.groupId === group.id ? (
+          <input
+            className="input tab-strip-rename"
+            aria-label={t("Group name")}
+            autoFocus
+            size={Math.max(8, editingGroup.value.length + 1)}
+            maxLength={80}
+            placeholder={group.name}
+            value={editingGroup.value}
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => setEditingGroup({ groupId: group.id, value: event.target.value })}
+            onBlur={() => saveGroupName(group)}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+              if (event.key === "Enter") saveGroupName(group);
+              if (event.key === "Escape") { groupNamed.current = true; refocus.current = group.id; setEditingGroup(null); }
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            role="tab"
+            className="tab-strip-tab"
+            data-group-id={group.id}
+            aria-selected={active}
+            aria-expanded={open}
+            aria-haspopup="menu"
+            aria-keyshortcuts="Shift+F10 F2"
+            tabIndex={active ? 0 : -1}
+            title={t("{n} tabs", { n: group.tabs.length })}
+            onMouseDown={(event) => { if (event.button === 2 || (event.button === 0 && event.ctrlKey)) event.preventDefault(); }}
+            onClick={(event) => { if (event.ctrlKey) return; event.currentTarget.focus({ preventScroll: true }); toggleGroup(group); }}
+            onContextMenu={(event) => { event.preventDefault(); openGroupMenu(event, group); }}
+          >
+            <Layers className="tab-strip-group-icon" aria-hidden="true" />
+            <span className="tab-strip-label">{group.name}</span>
+            <span className="tab-strip-group-dots" aria-hidden="true">
+              {group.tabs.map((tab) => <span className="tab-strip-dot" key={tab.tab_id} data-status={rollupStatus(panesOf(tab).map((pane) => paneStatus(pane as HerdrPane)))} />)}
+            </span>
+            <ChevronDown className="tab-strip-group-fold" aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    );
+  };
+  // the strip's own row: each tab outside a group, and each group's chip where its first tab is
+  const shownTabs = groups.find((group) => group.id === openGroupId) ?? null;
+  const rowItems = tabs.flatMap((tab, index) => {
+    const group = groupOf(tab.tab_id);
+    if (!group) return [renderTab(tab, index)];
+    return group.tabs[0] === tab ? [renderGroup(group)] : [];
+  });
+
   return (
     <>
       <div ref={strip} className="tab-strip" role="tablist" aria-label={t("Tabs of {workspace}", { workspace: workspace.label })} aria-busy={reorder.moving} onKeyDown={onKeyDown} onScroll={onScroll}
         onFocus={(event) => { if (event.target.getAttribute("role") === "tab") focusedTab.current = event.target; }}
         onBlur={(event) => { if (event.relatedTarget !== null) focusedTab.current = null; }}>
-        {tabs.map((tab, index) => {
-          const active = tab.tab_id === selectedPane.tab_id;
-          const own = panesOf(tab);
-          // Settle each pane's wait before rolling up, so a sibling's RUN or DONE stays visible.
-          const status = rollupStatus(own.map((pane) => paneStatus(pane as HerdrPane)));
-          const pickerOpen = picker?.tab.tab_id === tab.tab_id;
-          const name = nameOf(tab);
-          return (
-            <div className={`tab-strip-item${active ? " is-active" : ""}${own.length > 1 ? " has-panes" : ""}${editing?.tabId === tab.tab_id ? " is-editing" : ""}${reorder.drag?.tabId === tab.tab_id ? " is-dragging" : ""}${reorder.drag?.boundary === index ? " is-drop-before" : ""}${reorder.drag?.boundary === tabs.length && index === tabs.length - 1 ? " is-drop-after" : ""}`} key={tab.tab_id}>
-              {editing?.tabId === tab.tab_id ? (
-                <input
-                  className="input tab-strip-rename"
-                  aria-label={t("Tab name")}
-                  autoFocus
-                  size={Math.max(8, editing.value.length + 1)}
-                  maxLength={80}
-                  placeholder={name}
-                  value={editing.value}
-                  onFocus={(event) => event.currentTarget.select()}
-                  onChange={(event) => setEditing({ tabId: tab.tab_id, value: event.target.value })}
-                  onBlur={() => setEditing(null)}
-                  onKeyDown={(event) => {
-                    event.stopPropagation();
-                    // an IME's Enter and Escape are the composition's, not the field's
-                    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-                    if (event.key === "Enter") saveRename(tab);
-                    if (event.key === "Escape") { refocus.current = tab.tab_id; setEditing(null); }
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  role="tab"
-                  className="tab-strip-tab"
-                  data-tab-id={tab.tab_id}
-                  aria-selected={active}
-                  aria-haspopup="menu"
-                  aria-keyshortcuts="Shift+F10 Alt+Shift+ArrowLeft Alt+Shift+ArrowRight"
-                  aria-controls={panePanel}
-                  tabIndex={active ? 0 : -1}
-                  title={own.length === 1 && own[0] ? displayPaneTitle(own[0]) : t("{n} panes", { n: own.length })}
-                  onPointerDown={(event) => reorder.onPointerDown(event, tab.tab_id)}
-                  onPointerMove={reorder.onPointerMove}
-                  onPointerUp={reorder.onPointerUp}
-                  onPointerCancel={reorder.cancelDrag}
-                  onLostPointerCapture={reorder.cancelDrag}
-                  onDragStart={(event) => event.preventDefault()}
-                  onMouseDown={(event) => { if (event.button === 2 || (event.button === 0 && event.ctrlKey)) event.preventDefault(); }}
-                  onClick={(event) => {
-                    if (reorder.consumeClick(event.detail) || event.ctrlKey) return;
-                    event.currentTarget.focus({ preventScroll: true });
-                    const pane = paneFor(tab);
-                    if (pane && pane.pane_id !== selectedPane.pane_id) onSelectPane(pane.pane_id);
-                  }}
-                  onDoubleClick={() => beginRename(tab)}
-                  onContextMenu={(event) => { event.preventDefault(); openPicker(event, tab); }}
-                  // the middle button closes a tab, as it does a browser's
-                  onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); requestClose(tab); } }}
-                >
-                  {(status === "working" || status === "blocked" || status === "waiting" || status === "done") && <span className="tab-strip-dot" data-status={status} aria-hidden="true" />}
-                  <span className="tab-strip-label">{name}</span>
-                </button>
-              )}
-              {touchMenu && active && editing?.tabId !== tab.tab_id && <button type="button" className="tab-strip-menu" aria-label={t("Actions for {tab}", { tab: name })} aria-haspopup="menu" aria-expanded={pickerOpen} onClick={(event) => openPicker(event, tab)}>
-                <Ellipsis aria-hidden="true" />
-              </button>}
-            </div>
-          );
-        })}
+        {rowItems}
         <button type="button" className="tab-strip-add" aria-label={t("New tab")} title={t("New tab")} onClick={onNewTab}>
           <Plus aria-hidden="true" />
         </button>
         {error && <span className="tab-strip-error" role="alert">{error}</span>}
       </div>
+      {shownTabs && (
+        <div ref={groupRow} className="tab-group-row" role="tablist" aria-label={t("Tabs in {group}", { group: shownTabs.name })} onKeyDown={onKeyDown}
+          onFocus={(event) => { if (event.target.getAttribute("role") === "tab") focusedTab.current = event.target; }}
+          onBlur={(event) => { if (event.relatedTarget !== null) focusedTab.current = null; }}>
+          <span className="tab-group-row-name" aria-hidden="true">{shownTabs.name}</span>
+          {shownTabs.tabs.map((tab) => renderTab(tab, tabs.indexOf(tab)))}
+          <button type="button" className="tab-strip-add tab-group-row-add" aria-label={t("New tab in this group")} title={t("New tab in this group")} onClick={() => newTabInGroup(shownTabs)}>
+            <Plus aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {picker && <RowMenu anchor={picker.anchor} point={picker.point} restoreFocusTo={picker.previousFocus}
         title={nameOf(picker.tab)} items={pickerItems(picker.tab, picker.touch)} align="start" onClose={() => setPicker(null)} />}
+      {groupMenu && (() => {
+        const group = groups.find((candidate) => candidate.id === groupMenu.groupId);
+        return group ? <RowMenu anchor={groupMenu.anchor} point={groupMenu.point} restoreFocusTo={groupMenu.previousFocus}
+          title={group.name} items={groupMenuItems(group)} align="start" onClose={() => setGroupMenu(null)} /> : null;
+      })()}
       {confirm && <ConfirmDialog title={confirm.title} body={confirm.body} confirmLabel={t("Close tab")} onConfirm={async () => { await close(confirm.tab); setConfirm(null); }} onClose={() => setConfirm(null)} />}
     </>
   );
