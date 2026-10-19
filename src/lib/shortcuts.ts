@@ -86,15 +86,28 @@ export function matchShortcut(event: ShortcutEventLike, platformIsMac: boolean, 
   return id && !Object.hasOwn(overrides, id) ? id : null;
 }
 
+/** Ctrl and one letter on a Mac, nothing else held: a mission control chord (below). */
+function isMacCtrlLetter(event: ShortcutEventLike, platformIsMac: boolean, letter: string): boolean {
+  if (!platformIsMac || event.isComposing || event.keyCode === 229) return false;
+  if (!event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return false;
+  return event.code === `Key${letter.toUpperCase()}` || (!event.code && event.key.toLowerCase() === letter);
+}
+
 /**
  * Ctrl+N on a Mac opens New tab (mission control). Outside the Mod+Shift scheme and not
  * customizable: on a Mac, Ctrl is free of browser bindings, so the plain chord gets through. It takes
  * the key from the terminal and text fields (readline's next-history, Cocoa's next line).
  */
 export function isNewTabShortcut(event: ShortcutEventLike, platformIsMac: boolean): boolean {
-  if (!platformIsMac || event.isComposing || event.keyCode === 229) return false;
-  if (!event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return false;
-  return event.code === "KeyN" || (!event.code && event.key.toLowerCase() === "n");
+  return isMacCtrlLetter(event, platformIsMac, "n");
+}
+
+/**
+ * Ctrl+F on a Mac turns distraction-free mode on and off (mission control), as Ctrl+N above. It
+ * takes the key from the terminal: readline's forward-char, which → does as well.
+ */
+export function isDistractionFreeShortcut(event: ShortcutEventLike, platformIsMac: boolean): boolean {
+  return isMacCtrlLetter(event, platformIsMac, "f");
 }
 
 /** Mod+Shift+Space, held to dictate. matchShortcut never returns "voice": it has no action. */
@@ -135,7 +148,7 @@ export function keepsArrowsForText(target: KeyTargetLike | EventTarget | null): 
  */
 export function isAppShortcut(event: ShortcutEventLike, overrides: ShortcutOverrides = {}): boolean {
   const platformIsMac = isMacPlatform();
-  return matchShortcut(event, platformIsMac, overrides) !== null || isNewTabShortcut(event, platformIsMac);
+  return matchShortcut(event, platformIsMac, overrides) !== null || isNewTabShortcut(event, platformIsMac) || isDistractionFreeShortcut(event, platformIsMac);
 }
 
 export function isMacPlatform(): boolean {
@@ -161,6 +174,11 @@ export function useShortcuts(actions: AppActions, enabled: boolean): void {
       if (isNewTabShortcut(event, platformIsMac)) {
         event.preventDefault();
         actions.openNewTab();
+        return;
+      }
+      if (isDistractionFreeShortcut(event, platformIsMac)) {
+        event.preventDefault();
+        actions.toggleDistractionFree();
         return;
       }
       const shortcut = matchShortcut(event, platformIsMac, settings.shortcutOverrides);

@@ -134,6 +134,7 @@ export const ZH: Record<string, string> = {
   "Command palette": "命令面板",
   "Switch chat / terminal": "切换聊天 / 终端",
   "Toggle sidebar": "切换侧边栏",
+  "Distraction-free mode": "专注模式",
   "New workspace": "新建工作区",
   "Previous pane": "上一个窗格",
   "Next pane": "下一个窗格",

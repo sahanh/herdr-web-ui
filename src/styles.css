@@ -792,6 +792,15 @@ button {
   display: none;
 }
 
+/* distraction-free mode (mission control, Ctrl+F): the selected tab's panes fill the window. The
+   chrome is hidden, not unmounted, so the sidebar and strip keep their state for coming back */
+.app.is-distraction-free > .app-header,
+.app.is-distraction-free .sidebar,
+.app.is-distraction-free .scrim,
+.app.is-distraction-free .pane-column > :not(.terminal-host) {
+  display: none !important;
+}
+
 /* the pane and, over it, its workspace's tab strip when there is more than one pane to pick */
 .pane-column {
   display: flex;

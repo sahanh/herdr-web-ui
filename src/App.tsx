@@ -257,6 +257,8 @@ export function App() {
   useEffect(() => watchDrawerSwipe(() => drawerOpenRef.current, setDrawerOpen), []);
   // a desktop opened by a link that says so starts with the sidebar collapsed, and the address says so while it is
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => initialLink?.sidebar === "hidden");
+  // the page's alone, never kept: a reload brings the chrome back
+  const [distractionFree, setDistractionFree] = useState(false);
   // the width the sidebar's edge was dragged to on this device; null is the density's own
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const [lens, setLens] = useState<{ key: string; view: PaneView }>({ key: "", view: "terminal" });
@@ -951,6 +953,10 @@ export function App() {
         if (window.matchMedia("(max-width: 768px)").matches) setDrawerOpen((open) => !open);
         else setSidebarCollapsed((collapsed) => !collapsed);
       },
+      toggleDistractionFree: () => {
+        setDrawerOpen(false);
+        setDistractionFree((on) => !on);
+      },
       toggleTheme: () => updateSettings({ theme: resolvedTheme === "dark" ? "light" : "dark" }),
       lock: canSignOut ? () => void lock() : null,
       enableNotifications: bellVisible && bell.run === enableNotifications ? () => void enableNotifications() : null,
@@ -1068,7 +1074,7 @@ export function App() {
   if (locked) return <AccessGate reason={lockReason} initialCode={pairCode} onUnlocked={unlock} />;
 
   return (
-    <MachineSessionsProvider machineIds={machines.map((machine) => machine.id)}><MachineContext.Provider value={selectedMachineId}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`} style={sidebarWidth === null ? undefined : { "--sidebar-user-w": `${sidebarWidth}px` } as CSSProperties}>
+    <MachineSessionsProvider machineIds={machines.map((machine) => machine.id)}><MachineContext.Provider value={selectedMachineId}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}${distractionFree ? " is-distraction-free" : ""}`} style={sidebarWidth === null ? undefined : { "--sidebar-user-w": `${sidebarWidth}px` } as CSSProperties}>
       <header className={`app-header is-zoned${chatShown ? " is-chat" : ""}`}>
         {/* is-zoned tells this header from the connecting shell's, which has no zones to draw.
             .header-side is the sidebar's own top row from 769px (styles.css); below that its

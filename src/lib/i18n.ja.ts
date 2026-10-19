@@ -132,6 +132,7 @@ export const JA: Record<string, string> = {
   "Command palette": "コマンドパレット",
   "Switch chat / terminal": "チャット / ターミナルを切り替え",
   "Toggle sidebar": "サイドバーの切り替え",
+  "Distraction-free mode": "集中モード",
   "New workspace": "新しいワークスペース",
   "Previous pane": "前のペイン",
   "Next pane": "次のペイン",

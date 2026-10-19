@@ -1,6 +1,6 @@
 import { MachineContext, useMachineApi, useMachineId } from "../lib/machineContext.tsx";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
-import { Bell, Columns2, FolderOpen, LoaderCircle, LockKeyhole, Maximize2, MessageSquarePlus, Minimize2, Monitor, PanelLeft, Plus, Puzzle, RefreshCw, Rows2, Settings, SunMoon, SwitchCamera, X } from "lucide-react";
+import { Bell, Columns2, FolderOpen, Fullscreen, LoaderCircle, LockKeyhole, Maximize2, MessageSquarePlus, Minimize2, Monitor, PanelLeft, Plus, Puzzle, RefreshCw, Rows2, Settings, SunMoon, SwitchCamera, X } from "lucide-react";
 
 import "./CommandPalette.css";
 
@@ -245,6 +245,7 @@ export function CommandPalette({ open, onClose, machines, onSelect, snapshot, on
     ...(zoomPane && zoom && tabPanes > 1 ? [{ id: "zoom", label: t(zoom === "off" ? "Unzoom pane" : "Zoom pane"), icon: zoom === "off" ? Minimize2 : Maximize2, run: () => zoomPane(zoom) }] : []),
     { id: "view", label: t(view === "chat" ? "Switch to terminal" : "Switch to chat"), icon: SwitchCamera, shortcut: "toggle-view", run: actions.toggleView },
     { id: "sidebar", label: t("Toggle sidebar"), icon: PanelLeft, shortcut: "toggle-sidebar", run: actions.toggleSidebar },
+    { id: "distraction-free", label: t("Distraction-free mode"), icon: Fullscreen, run: actions.toggleDistractionFree },
     { id: "theme", label: t("Toggle theme"), icon: SunMoon, run: actions.toggleTheme },
     { id: "settings", label: t("Settings"), icon: Settings, shortcut: "settings", run: actions.openSettings },
     { id: "add-pc", label: t("Add PC"), icon: Monitor, run: actions.openAddPc },

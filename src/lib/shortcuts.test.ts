@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { isAppShortcut, isMacPlatform, isNewTabShortcut, matchShortcut, type ShortcutEventLike, keepsArrowsForText, shortcutConflict, shortcutDisplayKeys, shortcutKeys } from "./shortcuts.ts";
+import { isAppShortcut, isDistractionFreeShortcut, isMacPlatform, isNewTabShortcut, matchShortcut, type ShortcutEventLike, keepsArrowsForText, shortcutConflict, shortcutDisplayKeys, shortcutKeys } from "./shortcuts.ts";
 import { isReservedShortcutKey, sanitizeShortcutOverrides } from "./shortcutBindings.ts";
 
 function keyEvent(key: string, patch: Partial<ShortcutEventLike> = {}): ShortcutEventLike {
@@ -166,5 +166,15 @@ describe("isNewTabShortcut", () => {
     expect(isNewTabShortcut(keyEvent("n", { metaKey: true, shiftKey: false, code: "KeyN" }), true)).toBe(false);
     expect(isNewTabShortcut(keyEvent("N", { ctrlKey: true, code: "KeyN" }), true)).toBe(false);
     expect(isNewTabShortcut(keyEvent("n", { ctrlKey: true, shiftKey: false, altKey: true, code: "KeyN" }), true)).toBe(false);
+  });
+});
+
+describe("isDistractionFreeShortcut", () => {
+  it("Ctrl+F on a Mac, nothing else", () => {
+    expect(isDistractionFreeShortcut(keyEvent("f", { ctrlKey: true, shiftKey: false, code: "KeyF" }), true)).toBe(true);
+    expect(isDistractionFreeShortcut(keyEvent("f", { ctrlKey: true, shiftKey: false, code: "KeyF" }), false)).toBe(false);
+    expect(isDistractionFreeShortcut(keyEvent("f", { metaKey: true, shiftKey: false, code: "KeyF" }), true)).toBe(false);
+    expect(isDistractionFreeShortcut(keyEvent("F", { ctrlKey: true, code: "KeyF" }), true)).toBe(false);
+    expect(isDistractionFreeShortcut(keyEvent("n", { ctrlKey: true, shiftKey: false, code: "KeyN" }), true)).toBe(false);
   });
 });

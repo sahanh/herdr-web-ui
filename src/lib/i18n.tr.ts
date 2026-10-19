@@ -128,6 +128,7 @@ export const TR: Record<string, string> = {
   "Command palette": "Komut paleti",
   "Switch chat / terminal": "Sohbet / terminal arasında geçiş yap",
   "Toggle sidebar": "Kenar çubuğunu aç/kapat",
+  "Distraction-free mode": "Dikkat dağıtmayan mod",
   "New workspace": "Yeni çalışma alanı",
   "Previous pane": "Önceki panel",
   "Next pane": "Sonraki panel",
