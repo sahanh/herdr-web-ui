@@ -6,7 +6,7 @@
  */
 
 import { REPORTED_SETTINGS, type ReportedSetting } from "../../shared/telemetry.ts";
-import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LANGUAGE_SETTINGS, LOCALE_TAGS, resolveLanguage, setCurrentLanguage, type Language, type LanguageSetting } from "./i18n.ts";
 import type { AlertPrefs, DoneAlerts } from "../../shared/notify-policy.ts";
 import { chatFontStack, sanitizeFontFamily } from "./fontFamily.ts";
@@ -402,6 +402,33 @@ function saveSettings(settings: Settings): void {
   }
 }
 
+/**
+ * Shared settings (mission control): the server keeps one record for every browser and device
+ * (server/shared-settings.ts), so typography, theme and the rest follow the user. localStorage stays
+ * this browser's copy, read first so the page never paints without it. The settings below are this
+ * device's own and never leave it: its alerts (the push subscription is per device), its key bar
+ * and its wake lock.
+ */
+const SHARED_ROUTE = "/api/mission-control/settings";
+const SHARED_POLL_MS = 30_000;
+const SHARED_WRITE_DELAY_MS = 400;
+export const DEVICE_SETTINGS = ["keyBarExtras", "keyBarItems", "keepScreenOn", "alertsOn", "alertInput", "alertDone", "alertInApp", "alertSound"] as const satisfies readonly (keyof Settings)[];
+
+/** what the server keeps: every setting but this device's own */
+export function sharedPart(settings: Settings): Partial<Settings> {
+  const shared: Partial<Settings> = { ...settings };
+  for (const key of DEVICE_SETTINGS) delete shared[key];
+  return shared;
+}
+
+/** this browser's settings with the server's shared ones over them; anything else in the record is ignored */
+export function withShared(local: Settings, shared: unknown): Settings {
+  if (typeof shared !== "object" || shared === null || Array.isArray(shared)) return local;
+  const record: Record<string, unknown> = { ...(shared as Record<string, unknown>) };
+  for (const key of DEVICE_SETTINGS) delete record[key];
+  return sanitizeSettings({ ...local, ...record });
+}
+
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 export function resolveTheme(setting: ThemeSetting): ResolvedTheme {
@@ -509,12 +536,64 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     applyToDocument(settings, resolvedTheme, resolvedLanguage);
   }, [settings, resolvedTheme, resolvedLanguage]);
 
+  // a change here is sent a moment later, whole; until the server has it, a read is not taken,
+  // as its answer may predate the change
+  const latest = useRef(settings);
+  const writes = useRef(0);
+  const unsent = useRef(false);
+  const sendTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const send = useCallback(() => {
+    const serial = writes.current;
+    void fetch(SHARED_ROUTE, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings: sharedPart(latest.current) }) })
+      .catch(() => {})
+      .finally(() => { if (writes.current === serial) unsent.current = false; });
+  }, []);
+
   const update = useCallback((patch: Partial<Settings>) => {
     setSettings((current) => {
       const next = sanitizeSettings({ ...current, ...patch });
       saveSettings(next);
+      latest.current = next;
       return next;
     });
+    writes.current += 1;
+    unsent.current = true;
+    clearTimeout(sendTimer.current);
+    sendTimer.current = setTimeout(send, SHARED_WRITE_DELAY_MS);
+  }, [send]);
+
+  // the server's record on load, when the window comes back and every SHARED_POLL_MS while shown;
+  // before sign-in it answers 401 and this browser's copy stands
+  useEffect(() => {
+    let alive = true;
+    const read = (): void => {
+      if (unsent.current) return;
+      const serial = writes.current;
+      void fetch(SHARED_ROUTE, { cache: "no-store" })
+        .then((response) => (response.ok ? (response.json() as Promise<{ settings?: unknown }>) : null))
+        .then((body) => {
+          if (!alive || !body?.settings || unsent.current || writes.current !== serial) return;
+          setSettings((current) => {
+            const next = withShared(current, body.settings);
+            if (JSON.stringify(next) === JSON.stringify(current)) return current;
+            saveSettings(next);
+            latest.current = next;
+            return next;
+          });
+        })
+        .catch(() => {});
+    };
+    read();
+    const timer = setInterval(() => { if (document.visibilityState === "visible") read(); }, SHARED_POLL_MS);
+    const onVisible = (): void => { if (document.visibilityState === "visible") read(); };
+    window.addEventListener("focus", read);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      window.removeEventListener("focus", read);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const value = useMemo(() => ({ settings, resolvedTheme, resolvedLanguage, update }), [settings, resolvedTheme, resolvedLanguage, update]);

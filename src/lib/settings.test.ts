@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FONT_FAMILY_MAX_CHARS } from "./fontFamily.ts";
 import { DEFAULT_KEY_BAR_ITEMS, migrateKeyBarItems } from "./keyBar.ts";
-import { changedSettings, alertPrefs, CHAT_FONT_MAX, CHAT_FONT_MIN, CHAT_LANE_MAX_REM, CHAT_LANE_MIN, CHAT_WIDTHS, chatFontSize, chatLaneLength, chatLaneWidth, DEFAULT_SETTINGS, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, quickReplyButtons, sanitizeSettings, terminalTheme, forgetPaneViews, DICTATION_LANGUAGES, VOICE_BUTTONS, wantsVoiceInput } from "./settings.ts";
+import { changedSettings, DEVICE_SETTINGS, sharedPart, withShared, alertPrefs, CHAT_FONT_MAX, CHAT_FONT_MIN, CHAT_LANE_MAX_REM, CHAT_LANE_MIN, CHAT_WIDTHS, chatFontSize, chatLaneLength, chatLaneWidth, DEFAULT_SETTINGS, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, quickReplyButtons, sanitizeSettings, terminalTheme, forgetPaneViews, DICTATION_LANGUAGES, VOICE_BUTTONS, wantsVoiceInput } from "./settings.ts";
 
 it("keeps a tab's pane while out of use until this device turns the pause on", () => {
   expect(DEFAULT_SETTINGS.releasePaneAway).toBe(false);
@@ -581,4 +581,22 @@ it("highlights code unless turned off, and keeps a stored choice only when it is
   expect(sanitizeSettings({ highlightCode: false }).highlightCode).toBe(false);
   expect(sanitizeSettings({ highlightCode: "no" }).highlightCode).toBe(true);
   expect(sanitizeSettings({}).highlightCode).toBe(true);
+});
+
+describe("shared settings (mission control)", () => {
+  it("keeps this device's own settings out of what the server gets", () => {
+    const shared = sharedPart({ ...DEFAULT_SETTINGS, terminalFontSize: 15, alertsOn: false });
+    expect(shared.terminalFontSize).toBe(15);
+    for (const key of DEVICE_SETTINGS) expect(key in shared).toBe(false);
+  });
+
+  it("takes the server's settings over this browser's, but never its device settings or bad values", () => {
+    const local = { ...DEFAULT_SETTINGS, keepScreenOn: true, terminalFontSize: 12 };
+    const merged = withShared(local, { terminalFontSize: 16, keepScreenOn: false, theme: "nonsense", stray: 1 });
+    expect(merged.terminalFontSize).toBe(16);
+    expect(merged.keepScreenOn).toBe(true);
+    expect(merged.theme).toBe(DEFAULT_SETTINGS.theme);
+    expect("stray" in merged).toBe(false);
+    expect(withShared(local, null)).toBe(local);
+  });
 });
