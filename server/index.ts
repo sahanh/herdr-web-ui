@@ -109,6 +109,7 @@ import { handleMachineRequest } from "./machine-api.ts";
 import { handleMissionControlRequest, isMissionControlPath, MissionControlStore } from "./mission-control.ts";
 import { handleTabGroupsRequest, isTabGroupsPath, TabGroupStore } from "./tab-groups.ts";
 import { handleSharedSettingsRequest, isSharedSettingsPath, SharedSettingsStore } from "./shared-settings.ts";
+import { handleRecentRequest, isRecentPath, RecentStore } from "./mission-control-recent.ts";
 import { MachineRelay } from "./machine-relay.ts";
 import { sameOrigin } from "./machine-security.ts";
 import { PLUGIN_LOG_LIMIT, pluginActionResult, pluginLogEntry, pluginPaneContext, waitForPluginAction } from "./plugin-actions.ts";
@@ -531,6 +532,7 @@ export function createServer(
   const missionControl = MissionControlStore.inStateDir(options.stateDir ?? defaultStateDir());
   const tabGroups = TabGroupStore.inStateDir(options.stateDir ?? defaultStateDir());
   const sharedSettings = SharedSettingsStore.inStateDir(options.stateDir ?? defaultStateDir());
+  const recent = RecentStore.inStateDir(options.stateDir ?? defaultStateDir());
   const usage = options.usage ?? new UsageService();
   const voice = options.voice ?? new VoiceService({ stateDir: options.stateDir ?? defaultStateDir(), env: process.env, fetch });
   /** a login named here is taken as it is: a tagged node has none of its own to read (HERDR_WEB_TAILSCALE_OWNER) */
@@ -1735,6 +1737,7 @@ export function createServer(
       if (isMissionControlPath(pathname)) return handleMissionControlRequest(request, pathname, missionControl);
       if (isTabGroupsPath(pathname)) return handleTabGroupsRequest(request, pathname, tabGroups);
       if (isSharedSettingsPath(pathname)) return handleSharedSettingsRequest(request, sharedSettings);
+      if (isRecentPath(pathname)) return handleRecentRequest(request, pathname, recent);
       if (pathname === "/api/devices" || pathname.startsWith("/api/devices/")) {
         try {
           const response = await handleDeviceRequest(request, pathname, devices, access);
