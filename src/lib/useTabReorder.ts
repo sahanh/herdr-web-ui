@@ -2,7 +2,9 @@ import { useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } 
 import type { HerdrTab, TabMoved } from "../../shared/protocol.ts";
 import { adjacentTabBoundary, movedTabOrder, tabDropBoundary } from "./tabOrder.ts";
 
-type Drag = { tabId: string; boundary: number | null };
+/** `before` / `after`: the drop key of the item the insertion line is drawn beside, in the dragged row */
+type Drag = { tabId: string; boundary: number | null; before: string | null; after: string | null };
+type Drop = Omit<Drag, "tabId">;
 type Press = { tabId: string; pointerId: number; element: HTMLElement; x: number; y: number; startX: number; startY: number; started: boolean };
 type Operation = { expected: string | null; settled: boolean; timer?: number };
 
@@ -91,21 +93,29 @@ export function useTabReorder({ owner, tabs, strip, moveTab, failed, stale }: {
     const boundary = adjacentTabBoundary(current.current.ids, tabId, direction);
     if (boundary !== null) requestMove(tabId, boundary);
   };
-  const boundaryAt = (held: Press): number | null => {
-    const row = strip.current;
+  // A tab drops within its own row: the strip, or an open tab group's row. A row's items need not
+  // be herdr's tabs one for one (a group's chip stands for its tabs), so each item carries the
+  // native boundary before it (`data-boundary`) and the row the one past its last (`data-end-boundary`).
+  const rowOf = (held: Press): HTMLElement | null => held.element.closest<HTMLElement>('[role="tablist"]') ?? strip.current;
+  const dropAt = (held: Press): Drop | null => {
+    const row = rowOf(held);
     if (!row) return null;
     const box = row.getBoundingClientRect();
     if (held.y < box.top - 12 || held.y > box.bottom + 12 || held.x < box.left - 12 || held.x > box.right + 12) return null;
-    const rects = [...row.querySelectorAll<HTMLElement>(".tab-strip-item")].map((item) => item.getBoundingClientRect());
-    return tabDropBoundary(rects, held.x);
+    const items = [...row.querySelectorAll<HTMLElement>(":scope > .tab-strip-item")];
+    const at = tabDropBoundary(items.map((item) => item.getBoundingClientRect()), held.x);
+    const item = items[at];
+    if (item) return { boundary: Number(item.dataset["boundary"] ?? at), before: item.dataset["dropKey"] ?? null, after: null };
+    return { boundary: Number(row.dataset["endBoundary"] ?? current.current.ids.length), before: null, after: items[items.length - 1]?.dataset["dropKey"] ?? null };
   };
   const paintDrag = (held: Press): void => {
-    const boundary = boundaryAt(held);
-    setDrag((old) => old?.tabId === held.tabId && old.boundary === boundary ? old : { tabId: held.tabId, boundary });
+    const drop = dropAt(held) ?? { boundary: null, before: null, after: null };
+    setDrag((old) => old?.tabId === held.tabId && old.boundary === drop.boundary && old.before === drop.before && old.after === drop.after
+      ? old : { tabId: held.tabId, ...drop });
   };
   const tick = (): void => {
     const held = press.current;
-    const row = strip.current;
+    const row = held ? rowOf(held) : null;
     if (!held?.started || !row) { animation.current = null; return; }
     const box = row.getBoundingClientRect();
     const right = row.querySelector<HTMLElement>(".tab-strip-add")?.getBoundingClientRect().left ?? box.right;
@@ -141,7 +151,7 @@ export function useTabReorder({ owner, tabs, strip, moveTab, failed, stale }: {
     const held = press.current;
     if (!held || event.pointerId !== held.pointerId) return;
     held.x = event.clientX; held.y = event.clientY;
-    const boundary = held.started ? boundaryAt(held) : null;
+    const boundary = held.started ? dropAt(held)?.boundary ?? null : null;
     cancelDrag();
     if (boundary !== null) requestMove(held.tabId, boundary);
   };

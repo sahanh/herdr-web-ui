@@ -460,6 +460,9 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
   // only while the pane's own tab is in this snapshot (paneTabPanelLabel); the same call answers
   // here, so a tab never claims to control a panel that is not standing there as one.
   const panePanel = paneTabPanelLabel(snapshot, selectedPane, t) !== null ? PANE_TABPANEL_ID : undefined;
+  // the insertion line of a drag, drawn beside the item it falls before or after in its own row
+  const dropClass = (key: string): string =>
+    reorder.drag?.before === key ? " is-drop-before" : reorder.drag?.after === key ? " is-drop-after" : "";
   const renderTab = (tab: HerdrTab, index: number) => {
     const active = tab.tab_id === selectedPane.tab_id;
     const own = panesOf(tab);
@@ -468,7 +471,8 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
     const pickerOpen = picker?.tab.tab_id === tab.tab_id;
     const name = nameOf(tab);
     return (
-      <div className={`tab-strip-item${active ? " is-active" : ""}${own.length > 1 ? " has-panes" : ""}${editing?.tabId === tab.tab_id ? " is-editing" : ""}${reorder.drag?.tabId === tab.tab_id ? " is-dragging" : ""}${reorder.drag?.boundary === index ? " is-drop-before" : ""}${reorder.drag?.boundary === tabs.length && index === tabs.length - 1 ? " is-drop-after" : ""}`} key={tab.tab_id}>
+      <div className={`tab-strip-item${active ? " is-active" : ""}${own.length > 1 ? " has-panes" : ""}${editing?.tabId === tab.tab_id ? " is-editing" : ""}${reorder.drag?.tabId === tab.tab_id ? " is-dragging" : ""}${dropClass(tab.tab_id)}`} key={tab.tab_id}
+        data-boundary={index} data-drop-key={tab.tab_id}>
         {editing?.tabId === tab.tab_id ? (
           <input
             className="input tab-strip-rename"
@@ -501,7 +505,7 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
             aria-controls={panePanel}
             tabIndex={active ? 0 : -1}
             title={own.length === 1 && own[0] ? displayPaneTitle(own[0]) : t("{n} panes", { n: own.length })}
-            onPointerDown={groups.length === 0 ? (event) => reorder.onPointerDown(event, tab.tab_id) : undefined}
+            onPointerDown={(event) => reorder.onPointerDown(event, tab.tab_id)}
             onPointerMove={reorder.onPointerMove}
             onPointerUp={reorder.onPointerUp}
             onPointerCancel={reorder.cancelDrag}
@@ -534,7 +538,8 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
     const active = group.tabs.some((tab) => tab.tab_id === selectedPane.tab_id);
     const open = openGroupId === group.id;
     return (
-      <div className={`tab-strip-item tab-strip-group${active ? " is-active" : ""}${open ? " is-open" : ""}`} key={`group:${group.id}`}>
+      <div className={`tab-strip-item tab-strip-group${active ? " is-active" : ""}${open ? " is-open" : ""}${dropClass(`group:${group.id}`)}`} key={`group:${group.id}`}
+        data-boundary={group.tabs[0] ? tabs.indexOf(group.tabs[0]) : tabs.length} data-drop-key={`group:${group.id}`}>
         {editingGroup?.groupId === group.id ? (
           <input
             className="input tab-strip-rename"
@@ -591,7 +596,7 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
 
   return (
     <>
-      <div ref={strip} className="tab-strip" role="tablist" aria-label={t("Tabs of {workspace}", { workspace: workspace.label })} aria-busy={reorder.moving} onKeyDown={onKeyDown} onScroll={onScroll}
+      <div ref={strip} className="tab-strip" role="tablist" aria-label={t("Tabs of {workspace}", { workspace: workspace.label })} aria-busy={reorder.moving} data-end-boundary={tabs.length} onKeyDown={onKeyDown} onScroll={onScroll}
         onFocus={(event) => { if (event.target.getAttribute("role") === "tab") focusedTab.current = event.target; }}
         onBlur={(event) => { if (event.relatedTarget !== null) focusedTab.current = null; }}>
         {rowItems}
@@ -602,6 +607,7 @@ export function TabStrip({ snapshot, workspace, selectedPane, onSelectPane, onNe
       </div>
       {shownTabs && (
         <div ref={groupRow} className="tab-group-row" role="tablist" aria-label={t("Tabs in {group}", { group: shownTabs.name })} onKeyDown={onKeyDown}
+          data-end-boundary={tabs.indexOf(shownTabs.tabs[shownTabs.tabs.length - 1]!) + 1}
           onFocus={(event) => { if (event.target.getAttribute("role") === "tab") focusedTab.current = event.target; }}
           onBlur={(event) => { if (event.relatedTarget !== null) focusedTab.current = null; }}>
           <span className="tab-group-row-name" aria-hidden="true">{shownTabs.name}</span>
