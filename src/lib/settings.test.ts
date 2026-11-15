@@ -435,6 +435,8 @@ describe("palette", () => {
     expect(sanitizeSettings({ palette: "catppuccin" }).palette).toBe("catppuccin");
     expect(sanitizeSettings({ palette: "lilac" }).palette).toBe("lilac");
     expect(sanitizeSettings({ palette: "forest" }).palette).toBe("forest");
+    expect(sanitizeSettings({ palette: "github" }).palette).toBe("github");
+    expect(sanitizeSettings({ palette: "one" }).palette).toBe("one");
     expect(sanitizeSettings({ palette: "pink" }).palette).toBe("amber");
   });
 
@@ -466,6 +468,10 @@ describe("palette", () => {
     { theme: "light", palette: "lilac", layers: ['[data-theme="light"][data-palette="lilac"]', '[data-theme="light"]', ":root"] },
     { theme: "dark", palette: "forest", layers: ['[data-theme="dark"][data-palette="forest"]', ":root"] },
     { theme: "light", palette: "forest", layers: ['[data-theme="light"][data-palette="forest"]', '[data-theme="light"]', ":root"] },
+    { theme: "dark", palette: "github", layers: ['[data-theme="dark"][data-palette="github"]', ":root"] },
+    { theme: "light", palette: "github", layers: ['[data-theme="light"][data-palette="github"]', '[data-theme="light"]', ":root"] },
+    { theme: "dark", palette: "one", layers: ['[data-theme="dark"][data-palette="one"]', ":root"] },
+    { theme: "light", palette: "one", layers: ['[data-theme="light"][data-palette="one"]', '[data-theme="light"]', ":root"] },
   ] as const;
   const tokens = (layers: readonly string[]) => (name: string): string =>
     layers.map((selector) => block(selector).match(new RegExp(`--${name}: ([^;]+);`))?.[1]).find((value) => value !== undefined)!;
@@ -473,7 +479,7 @@ describe("palette", () => {
   it("mirrors each palette's --term-* tokens of styles.css for xterm", () => {
     for (const { theme, palette, layers } of cases) {
       const read = tokens(layers);
-      expect(terminalTheme(theme, palette)).toEqual({ background: read("term-bg"), foreground: read("term-fg"), cursor: read("term-cursor"), selectionBackground: read("term-selection") });
+      expect(terminalTheme(theme, palette)).toMatchObject({ background: read("term-bg"), foreground: read("term-fg"), cursor: read("term-cursor"), selectionBackground: read("term-selection") });
     }
   });
 

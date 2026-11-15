@@ -61,6 +61,8 @@ export const KO: Record<string, string> = {
   "Pin agent": "에이전트 고정",
   "Unpin agent": "에이전트 고정 해제",
   "Forest": "포레스트",
+  "GitHub": "GitHub",
+  "One": "One",
   "Density": "밀도",
   "Comfortable": "여유",
   "Compact": "촘촘",

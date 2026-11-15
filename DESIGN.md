@@ -12,7 +12,7 @@ chrome color, amber: focus, the chosen lens, the terminal cursor and the user's 
 buttons). Agent states carry the remaining saturated colors and none of them is amber. The user's
 chat turns are neutral raised cards, so a long thread never turns into a wall of color. Dark is the
 default, light follows the same hierarchy, and comfortable or compact density changes scale without
-changing information architecture. A dark report look, a neutral charcoal one, Catppuccin, lilac and forest are
+changing information architecture. A dark report look, a neutral charcoal one, Catppuccin, lilac, forest, GitHub and One are
 opt-in palettes (Settings → Appearance → Colors); amber stays the default and the look before settings load.
 
 The sidebar is one grid: a leading cell that says who or what a row is (the coding agent's brand
@@ -73,8 +73,8 @@ paper, not UI, and the viewer (`.file-viewer-pdf`) must not tint it for the them
 
 ### Opt-in palettes
 
-`settings.palette` (`amber` default, `report`, `charcoal`, `catppuccin`, `lilac`, `forest`) is written as `data-palette`. The
-tables above are amber, the base blocks; the five opt-in palettes override them in
+`settings.palette` (`amber` default, `report`, `charcoal`, `catppuccin`, `lilac`, `forest`, `github`, `one`) is written as `data-palette`. The
+tables above are amber, the base blocks; the seven opt-in palettes override them in
 `[data-theme][data-palette]` blocks of `src/styles.css`, which hold the complete values.
 
 `--bubble-border` is the edge of the chat's user bubble. It is `transparent` where `--bg-elevated`
@@ -95,6 +95,14 @@ all palettes) and dark Catppuccin, whose elevated surface is darker than its can
 - In light both use plain paper (`--bg` `#f2f2f0`, panel `#fafaf9`, text `#242424`, primary ink
   `#242424` with `#fafaf9` text): report with a blue `#1f5fcc` accent and cursor, charcoal with an
   ink accent and cursor `#242424`.
+- **GitHub** is Primer's GitHub Light and GitHub Dark. Light is the daylight choice: white `--bg`
+  and terminal, `#f6f8fa` chrome, `#1f2328` text, blue `#0969da` accent and primary; its states
+  are a step darker than Primer's (`#7d4e00`, `#a40e26`, `#116329`) so badges pass AA on their
+  tints. Dark is `#0d1117` / `#151b23` with Primer's brighter state hues.
+- **One** is Atom's One Dark and One Light. Dark is the original (`#282c34`, `#abb2bf`, blue
+  `#61afef`); One Light's hues are darkened until they pass AA on its near-white surfaces.
+- GitHub and One also bring their editor theme's 16 terminal ANSI colors (`terminalTheme()`); the
+  other palettes keep xterm's defaults.
 - **Catppuccin** follows [catppuccin.com/palette](https://catppuccin.com/palette/), its style guide
   and its Zed port: Mocha in dark, Latte in light. In both the content (chat canvas `--bg`,
   terminal) is Base, the chrome (`--bg-panel`: sidebar, the header over it and on a phone, tabs) and elevated surfaces Mantle,

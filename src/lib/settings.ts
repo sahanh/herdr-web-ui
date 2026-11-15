@@ -26,8 +26,10 @@ export type UsageCount = "used" | "left";
 export type UsageGlance = "week" | "session";
 /** amber: the herdr look (the default); report: the dark technical report look; charcoal: neutral Ghostty-style dark;
  *  catppuccin: Catppuccin Mocha in dark, Latte in light; lilac: lavender surfaces and indigo accents;
- *  forest: low-saturation green surfaces for long sessions */
-export type Palette = "amber" | "report" | "charcoal" | "catppuccin" | "lilac" | "forest";
+ *  forest: low-saturation green surfaces for long sessions; github: GitHub Dark and Light (the
+ *  highest contrast, for daylight); one: Atom's One Dark and One Light */
+export type Palette = "amber" | "report" | "charcoal" | "catppuccin" | "lilac" | "forest" | "github" | "one";
+const PALETTES: readonly Palette[] = ["amber", "report", "charcoal", "catppuccin", "lilac", "forest", "github", "one"];
 /** the chat lane's widest: the transcript, the composer column and the held list share it (--chat-w in src/styles.css).
  *  narrow: 820px; default: follows the pane, up to 60rem (chatLaneWidth); wide: 72rem; full: the pane, less the gutters */
 export type ChatWidth = "narrow" | "default" | "wide" | "full";
@@ -333,7 +335,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     agentCards: record["agentCards"] === true,
     agentPins: record["agentPins"] === true,
     quietOpenedDone: record["quietOpenedDone"] === true,
-    palette: record["palette"] === "amber" || record["palette"] === "report" || record["palette"] === "charcoal" || record["palette"] === "catppuccin" || record["palette"] === "lilac" || record["palette"] === "forest" ? record["palette"] : DEFAULT_SETTINGS.palette,
+    palette: PALETTES.includes(record["palette"] as Palette) ? record["palette"] as Palette : DEFAULT_SETTINGS.palette,
     terminalFontSize: typeof font === "number" && Number.isFinite(font) ? clampFont(font) : DEFAULT_SETTINGS.terminalFontSize,
     terminalLineHeight: typeof record["terminalLineHeight"] === "number" && Number.isFinite(record["terminalLineHeight"])
       ? Math.min(TERMINAL_LINE_HEIGHT_MAX, Math.max(TERMINAL_LINE_HEIGHT_MIN, Math.round(record["terminalLineHeight"] * 10) / 10))
@@ -436,7 +438,14 @@ export function resolveTheme(setting: ThemeSetting): ResolvedTheme {
   return typeof window !== "undefined" && window.matchMedia?.(DARK_QUERY).matches === false ? "light" : "dark";
 }
 
-type TerminalColors = { background: string; foreground: string; cursor: string; selectionBackground: string };
+type Ansi = "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white";
+/** the 16 ANSI colors, for a palette that brings its editor theme's own; the rest keep xterm's */
+type AnsiColors = Record<Ansi | `bright${Capitalize<Ansi>}`, string>;
+type TerminalColors = { background: string; foreground: string; cursor: string; selectionBackground: string } & Partial<AnsiColors>;
+const ansi = (normal: string[], bright: string[]): AnsiColors => {
+  const names: Ansi[] = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
+  return Object.fromEntries(names.flatMap((name, i) => [[name, normal[i]], [`bright${name[0]!.toUpperCase()}${name.slice(1)}`, bright[i]]])) as AnsiColors;
+};
 
 /** The xterm theme for a resolved theme and palette: the `--term-*` tokens of src/styles.css, verbatim. */
 const TERMINAL_THEMES: Record<Palette, Record<ResolvedTheme, TerminalColors>> = {
@@ -464,6 +473,24 @@ const TERMINAL_THEMES: Record<Palette, Record<ResolvedTheme, TerminalColors>> = 
     light: { background: "#f7fbf8", foreground: "#20352a", cursor: "#2c7648", selectionBackground: "#cfe5d5" },
     dark: { background: "#16231d", foreground: "#d4e5d8", cursor: "#8fd3a2", selectionBackground: "#31513e" },
   },
+  // github-vscode-theme's Light Default and Dark Default terminal colors
+  github: {
+    light: { background: "#ffffff", foreground: "#1f2328", cursor: "#0969da", selectionBackground: "#cee1f8",
+      ...ansi(["#24292f", "#cf222e", "#116329", "#4d2d00", "#0969da", "#8250df", "#1b7c83", "#6e7781"],
+        ["#57606a", "#a40e26", "#1a7f37", "#633c01", "#218bff", "#a475f9", "#3192aa", "#8c959f"]) },
+    dark: { background: "#0d1117", foreground: "#f0f6fc", cursor: "#4493f8", selectionBackground: "#264f78",
+      ...ansi(["#484f58", "#ff7b72", "#3fb950", "#d29922", "#58a6ff", "#bc8cff", "#39c5cf", "#b1bac4"],
+        ["#6e7681", "#ffa198", "#56d364", "#e3b341", "#79c0ff", "#d2a8ff", "#56d4dd", "#ffffff"]) },
+  },
+  // One Dark's terminal colors; One Light's, darkened as its chrome is
+  one: {
+    light: { background: "#fafafa", foreground: "#383a42", cursor: "#526fff", selectionBackground: "#d6dcf0",
+      ...ansi(["#383a42", "#c4382b", "#3a7a39", "#8a5d00", "#2f5fd0", "#a626a4", "#016b99", "#a0a1a7"],
+        ["#696c77", "#b3261e", "#2d6b2c", "#7a5300", "#4078f2", "#8a1f88", "#0184bc", "#c2c2c3"]) },
+    dark: { background: "#282c34", foreground: "#abb2bf", cursor: "#528bff", selectionBackground: "#3e4451",
+      ...ansi(["#3f4451", "#e06c75", "#98c379", "#d19a66", "#61afef", "#c678dd", "#56b6c2", "#d7dae0"],
+        ["#4f5666", "#be5046", "#a5e075", "#e5c07b", "#4dc4ff", "#de73ff", "#4cd1e0", "#e6e6e6"]) },
+  },
 };
 
 export function terminalTheme(theme: ResolvedTheme, palette: Palette = "amber"): TerminalColors {
@@ -478,6 +505,8 @@ const THEME_COLOR: Record<Palette, Record<ResolvedTheme, string>> = {
   catppuccin: { dark: "#181825", light: "#e6e9ef" },
   lilac: { dark: "#1c1b34", light: "#f6f5fe" },
   forest: { dark: "#16231d", light: "#f7fbf8" },
+  github: { dark: "#151b23", light: "#f6f8fa" },
+  one: { dark: "#21252b", light: "#f0f0f1" },
 };
 
 function applyToDocument(settings: Settings, resolved: ResolvedTheme, language: Language): void {
