@@ -497,6 +497,12 @@ export function terminalTheme(theme: ResolvedTheme, palette: Palette = "amber"):
   return TERMINAL_THEMES[palette][theme];
 }
 
+/** xterm's contrast floor. A program in its dark theme writes its text as truecolor white,
+ *  which no palette reaches; on a light background xterm darkens it to AA instead. */
+export function terminalContrast(theme: ResolvedTheme): number {
+  return theme === "light" ? 4.5 : 1;
+}
+
 /** `<meta name="theme-color">` follows the panel surface so the PWA title bar matches. */
 const THEME_COLOR: Record<Palette, Record<ResolvedTheme, string>> = {
   amber: { dark: "#181613", light: "#faf8f3" },

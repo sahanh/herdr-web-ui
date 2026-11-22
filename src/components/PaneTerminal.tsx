@@ -39,7 +39,7 @@ import { Composer } from "./Composer.tsx";
 import { PendingMessages } from "./PendingMessages.tsx";
 import type { AgentStatus, ClientRole, ConversationMetadata, InteractivePrompt, PlanSummary, ServerMessage } from "../../shared/protocol.ts";
 import type { PaneView } from "../lib/actions.ts";
-import { chatLaneLength, useSettings, terminalTheme, type Palette, type ResolvedTheme, type TerminalCursorStyle } from "../lib/settings.ts";
+import { chatLaneLength, useSettings, terminalTheme, terminalContrast, type Palette, type ResolvedTheme, type TerminalCursorStyle } from "../lib/settings.ts";
 import { loadFontStack, TERMINAL_FONT_STACK, terminalFontStack } from "../lib/fontFamily.ts";
 import { useT } from "../lib/i18n.ts";
 import { isAppShortcut } from "../lib/shortcuts.ts";
@@ -506,6 +506,7 @@ export function PaneTerminal({
       // a chosen family follows in the font effect below, once its faces have loaded
       fontFamily: TERMINAL_FONT_STACK,
       theme: terminalTheme(theme, palette),
+      minimumContrastRatio: terminalContrast(theme),
       linkHandler: {
         activate: (event, uri) => {
           if (!linkPressed(event)) return;
@@ -1706,7 +1707,9 @@ export function PaneTerminal({
   // the theme follows the settings without a remount
   useEffect(() => {
     const term = termRef.current;
-    if (term) term.options.theme = terminalTheme(theme, palette);
+    if (!term) return;
+    term.options.theme = terminalTheme(theme, palette);
+    term.options.minimumContrastRatio = terminalContrast(theme);
   }, [theme, palette]);
 
   // the cursor's shape and blink follow too; a program's own DECSCUSR still overrides them until
